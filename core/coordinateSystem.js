@@ -2,77 +2,92 @@
 
 export class CoordinateSystem {
   constructor() {
-    // World origin (anchored reference point)
-    this.origin = { x: 0, y: 0, z: 0 };
-
-    // Global visualization scale
+    this.origin = null;
     this.scale = 1.0;
 
-    // Whether origin has been initialized
     this.initialized = false;
+
+    // stability filter for origin selection
+    this.originCandidates = [];
+    this.originSampleSize = 10;
   }
 
   /**
-   * Set the world origin using the first stable or chosen point.
-   * This anchors all future coordinates.
+   * Feed candidate origin points first
+   * (prevents noisy first-frame locking)
    */
-  setOrigin(point) {
-    this.origin = {
-      x: point.x,
-      y: point.y,
-      z: point.z,
-    };
+  observeOriginCandidate(point) {
+    if (this.initialized) return;
+
+    this.originCandidates.push(point);
+
+    if (this.originCandidates.length >= this.originSampleSize) {
+      this._lockOrigin();
+    }
+  }
+
+  /**
+   * Lock origin using average of samples (noise reduction)
+   */
+  _lockOrigin() {
+    const avg = this.originCandidates.reduce(
+      (acc, p) => {
+        acc.x += p.x;
+        acc.y += p.y;
+        acc.z += p.z;
+        return acc;
+      },
+      { x: 0, y: 0, z: 0 }
+    );
+
+    avg.x /= this.originCandidates.length;
+    avg.y /= this.originCandidates.length;
+    avg.z /= this.originCandidates.length;
+
+    this.origin = avg;
     this.initialized = true;
   }
 
   /**
-   * Convert raw Android/world input into Three.js-compatible space.
-   * Handles:
-   * - origin offset
-   * - axis correction
-   * - scaling
+   * Transform into world/render space
    */
   transform(raw) {
+    // still collecting origin
     if (!this.initialized) {
-      this.setOrigin(raw);
+      this.observeOriginCandidate(raw);
+      return { x: 0, y: 0, z: 0 };
     }
 
-    // Translate relative to origin
     let x = raw.x - this.origin.x;
     let y = raw.y - this.origin.y;
     let z = raw.z - this.origin.z;
 
-    // Axis correction:
-    // Android Z-forward → Three.js Z-backward
+    // Android → Three.js axis correction
     z = -z;
 
-    // Apply global scale
-    x *= this.scale;
-    y *= this.scale;
-    z *= this.scale;
-
-    return { x, y, z };
+    return {
+      x: x * this.scale,
+      y: y * this.scale,
+      z: z * this.scale
+    };
   }
 
   /**
-   * Transform an array of points into render space.
+   * Batch transform
    */
   transformArray(points) {
     return points.map(p => this.transform(p));
   }
 
   /**
-   * Reset coordinate system (useful for new session / replay)
+   * Reset full system
    */
   reset() {
+    this.origin = null;
     this.initialized = false;
-    this.origin = { x: 0, y: 0, z: 0 };
+    this.originCandidates = [];
   }
 
-  /**
-   * Adjust visualization scale dynamically.
-   * Useful for zooming into traces or compressing space.
-   */
   setScale(scale) {
     this.scale = scale;
   }
