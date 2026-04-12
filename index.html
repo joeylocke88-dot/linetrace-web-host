@@ -19,7 +19,7 @@
 <script>
   let scene, camera, renderer, ws = null;
   let currentRoom = "default";
-  const paths = new Map();
+  const paths = new Map();   // userId → Line
 
   async function init() {
     scene = new THREE.Scene();
