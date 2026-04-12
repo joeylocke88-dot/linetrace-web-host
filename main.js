@@ -9,10 +9,21 @@ const buffer = new TraceBuffer();
 connect((sample) => {
   buffer.add(sample);
 
-  const points = buffer.getPositions();
-  const smoothed = smooth(points);
+  import { CoordinateSystem } from './core/coordinateSystem.js';
+
+const coord = new CoordinateSystem();
+
+connect((sample) => {
+  buffer.add(sample);
+
+  const rawPoints = buffer.getPositions();
+
+  const transformed = coord.transformArray(rawPoints);
+
+  const smoothed = smooth(transformed);
 
   renderer.drawTrace(smoothed);
+});
 });
 
 renderer.render();
