@@ -7,6 +7,7 @@
   <style>
     body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; }
     #ui { position:absolute; top:10px; left:10px; color:white; z-index:100; background:rgba(0,0,0,0.6); padding:12px; border-radius:8px; }
+    #status { position:absolute; bottom:10px; left:10px; color:#0f0; z-index:100; }
   </style>
 </head>
 <body>
@@ -15,11 +16,17 @@
   <button onclick="joinRoom()">Join Room</button>
   <button onclick="startAR()">Enter AR</button>
 </div>
+<div id="status"></div>
 
 <script>
   let scene, camera, renderer, ws = null;
   let currentRoom = "default";
-  const paths = new Map();   // userId → Line
+  const paths = new Map();
+
+  function log(msg) {
+    document.getElementById('status').textContent = msg;
+    console.log(msg);
+  }
 
   async function init() {
     scene = new THREE.Scene();
@@ -32,8 +39,11 @@
     scene.add(new THREE.AmbientLight(0xffffff, 1));
     scene.add(new THREE.HemisphereLight(0xbbbbff, 0x444422, 0.8));
 
-    const grid = new THREE.GridHelper(100, 50);
+    const grid = new THREE.GridHelper(100, 50, 0x888888, 0x444444);
     scene.add(grid);
+
+    camera.position.set(0, 8, 15);
+    camera.lookAt(0, 0, 0);
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
@@ -42,6 +52,7 @@
     });
 
     renderer.setAnimationLoop(() => renderer.render(scene, camera));
+    log("3D scene ready. Click Join Room then Enter AR.");
   }
 
   function joinRoom() {
@@ -52,9 +63,13 @@
     ws = new WebSocket(wsUrl);
 
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "path_point") handlePathPoint(msg);
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "path_point") handlePathPoint(msg);
+      } catch (_) {}
     };
+
+    log(`Joined room: ${currentRoom}`);
   }
 
   function handlePathPoint(msg) {
@@ -67,21 +82,29 @@
       paths.set(msg.user, line);
     }
     const positions = line.geometry.attributes.position?.array || [];
-    const newPos = [...positions, msg.point.x, msg.point.y, msg.point.z];
+    const newPos = [...positions, msg.point.x || 0, msg.point.y || 0, msg.point.z || 0];
     line.geometry.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3));
     line.geometry.attributes.position.needsUpdate = true;
   }
 
   async function startAR() {
-    if (!navigator.xr) return alert("WebXR not supported on this device");
+    if (!navigator.xr) {
+      log("WebXR not supported on this browser/device");
+      return;
+    }
+
     try {
+      // Use the safest possible configuration for mobile AR
       const session = await navigator.xr.requestSession("immersive-ar", {
-        requiredFeatures: ["local-floor"]
+        requiredFeatures: [],           // Empty = most compatible
+        optionalFeatures: ["local-floor", "hit-test"]
       });
+
       renderer.xr.setSession(session);
-      console.log("✅ AR Session Started");
+      log("✅ AR Session Started Successfully!");
     } catch (err) {
-      alert("AR failed: " + err.message);
+      log("AR failed: " + err.message);
+      console.error(err);
     }
   }
 
