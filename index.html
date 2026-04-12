@@ -6,24 +6,20 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
   <style>
     body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; }
-    #ui { position:absolute; top:10px; left:10px; color:white; z-index:100; background:rgba(0,0,0,0.5); padding:10px; border-radius:8px; }
+    #ui { position:absolute; top:10px; left:10px; color:white; z-index:100; background:rgba(0,0,0,0.6); padding:12px; border-radius:8px; }
   </style>
 </head>
 <body>
 <div id="ui">
-  Room: <input id="room" value="default" style="width:120px"> 
-  <button onclick="join()">Join</button>
+  Room: <input id="room" value="default" style="width:140px"> 
+  <button onclick="joinRoom()">Join Room</button>
   <button onclick="startAR()">Enter AR</button>
 </div>
 
 <script>
-  let scene, camera, renderer, arSession;
-  let ws = null;
-  let myUserId = "web_" + Math.random().toString(36).slice(2,9);
+  let scene, camera, renderer, ws = null;
   let currentRoom = "default";
-
-  const paths = new Map();     // userId → THREE.Line
-  const surfelClouds = new Map(); // chunkKey → THREE.Points
+  const paths = new Map();
 
   async function init() {
     scene = new THREE.Scene();
@@ -48,76 +44,48 @@
     renderer.setAnimationLoop(() => renderer.render(scene, camera));
   }
 
-  function join() {
+  function joinRoom() {
     currentRoom = document.getElementById('room').value || 'default';
     if (ws) ws.close();
 
-    ws = new WebSocket(`ws://localhost:8080?room=${currentRoom}&user=${myUserId}`);
+    const wsUrl = `wss://linetrace-host.onrender.com?room=${currentRoom}&user=web_${Math.random().toString(36).slice(2)}`;
+    ws = new WebSocket(wsUrl);
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === "path_point") handlePathPoint(msg);
-      if (msg.type === "surfel_delta") handleSurfelDelta(msg);
-      if (msg.type === "user_pose") handleUserPose(msg);
     };
   }
 
   function handlePathPoint(msg) {
     let line = paths.get(msg.user);
     if (!line) {
-      const mat = new THREE.LineBasicMaterial({color: 0x00ff88, linewidth: 4});
+      const mat = new THREE.LineBasicMaterial({color: 0x00ff88});
       const geo = new THREE.BufferGeometry();
       line = new THREE.Line(geo, mat);
       scene.add(line);
       paths.set(msg.user, line);
     }
-    const pos = line.geometry.attributes.position || new THREE.Float32BufferAttribute([], 3);
-    const arr = pos.array ? Array.from(pos.array) : [];
-    arr.push(msg.point.x, msg.point.y, msg.point.z);
-    line.geometry.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    const positions = line.geometry.attributes.position?.array || [];
+    const newPos = [...positions, msg.point.x, msg.point.y, msg.point.z];
+    line.geometry.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3));
     line.geometry.attributes.position.needsUpdate = true;
-  }
-
-  function handleSurfelDelta(msg) {
-    // Simple point cloud for now (you can upgrade to instanced mesh later)
-    let cloud = surfelClouds.get(msg.chunkKey);
-    if (!cloud) {
-      const geo = new THREE.BufferGeometry();
-      const mat = new THREE.PointsMaterial({size: 0.04, color: 0x4488ff});
-      cloud = new THREE.Points(geo, mat);
-      scene.add(cloud);
-      surfelClouds.set(msg.chunkKey, cloud);
-    }
-    // Append surfels (x,y,z only for demo)
-    const positions = cloud.geometry.attributes.position?.array || [];
-    const newPos = msg.surfels.flatMap(s => [s.px, s.py, s.pz]);
-    cloud.geometry.setAttribute('position', new THREE.Float32BufferAttribute([...positions, ...newPos], 3));
-  }
-
-  function handleUserPose(msg) {
-    // You can add simple avatar spheres for other users here if desired
   }
 
   async function startAR() {
     if (!navigator.xr) return alert("WebXR not supported on this device");
     try {
-      arSession = await navigator.xr.requestSession("immersive-ar", {
-        requiredFeatures: ["local-floor"],
-        optionalFeatures: ["hit-test"]
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: ["local-floor"]
       });
-      renderer.xr.setSession(arSession);
-      console.log("✅ WebXR AR session started – shared world is live");
-    } catch (e) { console.error(e); }
+      renderer.xr.setSession(session);
+      console.log("✅ AR Session Started");
+    } catch (err) {
+      alert("AR failed: " + err.message);
+    }
   }
 
-  // Public API so your Android app can push data
-  window.sendToWebHost = (type, payload) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({type, ...payload}));
-    }
-  };
-
-  init();
+  window.onload = init;
 </script>
 </body>
 </html>
