@@ -1,29 +1,32 @@
 import { Renderer } from './core/renderer.js';
 import { TraceBuffer } from './core/traceBuffer.js';
-import { smooth } from './core/smoothing.js';
+import { CoordinateSystem } from './core/coordinateSystem.js';
+import { Smoother } from './core/smoothing.js';
 import { connect } from './network/websocket.js';
 
 const renderer = new Renderer();
 const buffer = new TraceBuffer();
-
-connect((sample) => {
-  buffer.add(sample);
-
-  import { CoordinateSystem } from './core/coordinateSystem.js';
-
 const coord = new CoordinateSystem();
+const smoother = new Smoother(0.2);
 
+// 🧠 SINGLE STREAM PIPELINE
 connect((sample) => {
+
+  // 1. Store raw data
   buffer.add(sample);
 
+  // 2. Convert to array of points
   const rawPoints = buffer.getPositions();
 
-  const transformed = coord.transformArray(rawPoints);
+  // 3. Coordinate transform
+  const worldPoints = coord.transformArray(rawPoints);
 
-  const smoothed = smooth(transformed);
+  // 4. Smooth in streaming-safe way
+  const smoothed = worldPoints.map(p => smoother.update(p));
 
-  renderer.drawTrace(smoothed);
+  // 5. Render
+  renderer.updatePoints(smoothed);
 });
-});
 
+// Start render loop
 renderer.render();
