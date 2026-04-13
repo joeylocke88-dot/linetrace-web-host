@@ -142,3 +142,19 @@ process.on('SIGTERM', () => {
     console.log('Server shutdown cleanly');
   });
 });
+const globalAnchor = {
+  x: 0,
+  y: 0,
+  z: 0,
+  initialized: false
+};
+if (!globalAnchor.initialized) {
+  globalAnchor.x = 0;
+  globalAnchor.y = 0;
+  globalAnchor.z = 0;
+  globalAnchor.initialized = true;
+}
+ws.send(JSON.stringify({
+  type: "anchor",
+  anchor: globalAnchor
+}));
