@@ -137,6 +137,80 @@ wss.on('connection', (ws, req) => {
       msg.user = user;
       msg.room = room;
       msg.timestamp = Date.now();
+       // =========================
+  // AR ANCHOR MESSAGE (NEW)
+  // =========================
+  if (msg.type === "ar_anchor") {
+
+    for (const [id, client] of clients.entries()) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      client.send(JSON.stringify({
+        type: "ar_anchor",
+        user,
+        room,
+        anchor: msg.anchor,
+        timestamp: msg.timestamp
+      }));
+    }
+
+    return; // IMPORTANT: prevents double broadcast
+  }
+
+  // =========================
+  // IMU MESSAGE (optional keep)
+  // =========================
+  if (msg.type === "imu") {
+    for (const [id, client] of clients.entries()) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      client.send(JSON.stringify(msg));
+    }
+    return;
+  }
+
+  // =========================
+  // DEFAULT BROADCAST (other data)
+  // =========================
+  for (const [id, client] of clients.entries()) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    client.send(JSON.stringify(msg));
+  }
+});
+🧠 WHY THIS MATTERS
+
+Without this separation:
+
+anchors get mixed with IMU noise
+clients overwrite world origin incorrectly
+drift correction becomes unstable
+
+With this:
+
+✔ AR anchors = authoritative world structure
+✔ IMU = motion detail only
+✔ other messages = general sync
+🚀 NEXT STEP (if you want to go further)
+
+Right now your system is:
+
+shared AR world + IMU motion stream
+
+Next upgrade is:
+
+🔥 “anchor reconciliation layer”
+
+That makes:
+
+multiple phones agree on same origin
+prevents world sliding between users
+locks coordinate system globally
+
+Say:
+
+“add global anchor reconciliation”
+
+and I’ll take this into a true multi-device shared spatial system (like AR multiplayer physics alignment).
 
       // broadcast to room
       for (const [id, client] of clients.entries()) {
