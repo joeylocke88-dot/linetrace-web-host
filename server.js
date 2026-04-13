@@ -1,4 +1,4 @@
-// server.js - Render-safe stable WebSocket server
+// server.js - Render-safe stable WebSocket server with shared world anchor
 
 const http = require('http');
 const WebSocket = require('ws');
@@ -20,15 +20,29 @@ const server = http.createServer((req, res) => {
 });
 
 // =========================
-// WEBSOCKET SERVER (IMPORTANT: NO path restriction)
+// WEBSOCKET SERVER
 // =========================
 const wss = new WebSocket.Server({ server });
 
-// Room storage
+// =========================
+// ROOM STORAGE
+// =========================
 const rooms = new Map();
 
 // =========================
-// HEARTBEAT (prevents silent disconnects)
+// SHARED WORLD STATE (ANCHOR AUTHORITY)
+// =========================
+const worldState = {
+  anchor: {
+    x: 0,
+    y: 0,
+    z: 0
+  },
+  version: 1
+};
+
+// =========================
+// HEARTBEAT SYSTEM
 // =========================
 function heartbeat() {
   this.isAlive = true;
@@ -50,13 +64,30 @@ const heartbeatInterval = setInterval(() => {
 }, 30000);
 
 // =========================
+// BROADCAST ANCHOR (future-safe)
+// =========================
+function broadcastAnchor() {
+  for (const room of rooms.values()) {
+    for (const client of room.values()) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: "anchor",
+          anchor: worldState.anchor,
+          version: worldState.version
+        }));
+      }
+    }
+  }
+}
+
+// =========================
 // CONNECTION HANDLER
 // =========================
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', heartbeat);
 
-  // SAFE URL PARSING (Render-safe)
+  // Safe URL parsing (Render-compatible)
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   const room = url.searchParams.get('room') || 'default';
@@ -79,6 +110,15 @@ wss.on('connection', (ws, req) => {
   console.log(`✅ [${room}] ${user} connected`);
 
   // =========================
+  // SEND INITIAL ANCHOR (CRITICAL FIX)
+  // =========================
+  ws.send(JSON.stringify({
+    type: "anchor",
+    anchor: worldState.anchor,
+    version: worldState.version
+  }));
+
+  // =========================
   // MESSAGE HANDLING
   // =========================
   ws.on('message', (raw) => {
@@ -86,26 +126,25 @@ wss.on('connection', (ws, req) => {
 
     try {
       msg = JSON.parse(raw);
-    } catch (err) {
+    } catch {
       return;
     }
 
-    // Basic validation (prevents crashes)
     if (!msg || typeof msg !== 'object') return;
-    if (!msg.point) return;
 
-    msg.user = user;
-    msg.room = room;
-    msg.timestamp = Date.now();
+    // Only process spatial points
+    if (msg.type === "path_point" && msg.point) {
+      msg.user = user;
+      msg.room = room;
+      msg.timestamp = Date.now();
 
-    // Broadcast to room
-    for (const [id, client] of clients.entries()) {
-      if (client.readyState !== WebSocket.OPEN) continue;
+      // broadcast to room
+      for (const [id, client] of clients.entries()) {
+        if (client.readyState !== WebSocket.OPEN) continue;
+        if (id === user) continue;
 
-      // Skip sender (prevents echo spam)
-      if (id === user) continue;
-
-      client.send(JSON.stringify(msg));
+        client.send(JSON.stringify(msg));
+      }
     }
   });
 
@@ -135,26 +174,12 @@ server.listen(PORT, () => {
   console.log(`🚀 LineTrace server running on port ${PORT}`);
 });
 
-// Cleanup interval on shutdown
+// =========================
+// SHUTDOWN CLEANUP
+// =========================
 process.on('SIGTERM', () => {
   clearInterval(heartbeatInterval);
   server.close(() => {
     console.log('Server shutdown cleanly');
   });
 });
-const globalAnchor = {
-  x: 0,
-  y: 0,
-  z: 0,
-  initialized: false
-};
-if (!globalAnchor.initialized) {
-  globalAnchor.x = 0;
-  globalAnchor.y = 0;
-  globalAnchor.z = 0;
-  globalAnchor.initialized = true;
-}
-ws.send(JSON.stringify({
-  type: "anchor",
-  anchor: globalAnchor
-}));
