@@ -4,32 +4,77 @@ import { CoordinateSystem } from './core/coordinateSystem.js';
 import { Smoother } from './core/smoothing.js';
 import { connect } from './network/websocket.js';
 
+// optional missing dependency fix
+import { Flow } from './core/flow.js';
+
 const renderer = new Renderer();
 const buffer = new TraceBuffer();
 const coord = new CoordinateSystem();
 const smoother = new Smoother(0.2);
+const flow = new Flow();
 
-// 🧠 SINGLE STREAM PIPELINE
-connect((sample) => {
+// current world anchor
+let anchor = { x: 0, y: 0, z: 0 };
 
-  // 1. Store raw data
-  buffer.add(sample);
+// =========================
+// STREAM CONNECT
+// =========================
+connect((msg) => {
 
-  // 2. Convert to array of points
+  if (!msg) return;
+
+  // =========================
+  // 1. IMU STREAM (motion drive)
+  // =========================
+  if (msg.type === "imu" && msg.data) {
+    buffer.add({
+      x: msg.data.x,
+      y: msg.data.y,
+      z: msg.data.z
+    });
+  }
+
+  // =========================
+  // 2. PATH POINT STREAM
+  // =========================
+  if (msg.type === "path_point") {
+    buffer.add({
+      x: msg.x,
+      y: msg.y,
+      z: msg.z
+    });
+  }
+
+  // =========================
+  // 3. ANCHOR UPDATE
+  // =========================
+  if (msg.type === "anchor") {
+    anchor = msg.anchor || anchor;
+    coord.setAnchor(anchor);
+    return; // anchor doesn't render directly
+  }
+
+  // =========================
+  // RENDER PIPELINE
+  // =========================
+
   const rawPoints = buffer.getPositions();
+  if (rawPoints.length < 2) return;
 
-  // 3. Coordinate transform
+  // world transform
   const worldPoints = coord.transformArray(rawPoints);
 
-  // 4. Smooth in streaming-safe way
+  // smoothing
   const smoothed = worldPoints.map(p => smoother.update(p));
 
-  // 5. Render
+  // render vectors
   for (let i = 1; i < smoothed.length; i++) {
-  const v = flow.addMotion(smoothed[i-1], smoothed[i]);
-  renderer.addVector(v);
-}
+    const v = flow.addMotion(smoothed[i - 1], smoothed[i]);
+    renderer.addVector(v);
+  }
 });
 
-// Start render loop
+// =========================
+// RENDER LOOP
+// =========================
 renderer.render();
