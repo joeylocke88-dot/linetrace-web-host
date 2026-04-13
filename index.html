@@ -138,7 +138,9 @@
       log(`Connected → Room: ${currentRoom}`);
     };
 
-    ws.onmessage = (e) => {
+    ws.onmessage = (e) => {if (msg.type === "anchor") {
+  coord.setOrigin(msg.anchor);
+}
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === "path_point") handlePathPoint(msg);
