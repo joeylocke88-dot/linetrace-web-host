@@ -12,25 +12,28 @@ const coord = new CoordinateSystem();
 const smoother = new Smoother(0.2);
 const flow = new Flow();
 
-// =========================
-// GRID SHADER (NOW ACTIVE)
-// =========================
+// 🔥 GPU FIELD
 const grid = new GridShader(renderer.scene);
 
-// current world anchor
+// WORLD STATE
 let anchor = { x: 0, y: 0, z: 0 };
 
 // =========================
-// STREAM CONNECT
+// SERVER CONNECTION
 // =========================
-connect((msg) => {
+const ws = connect(handleServerMessage);
+
+// =========================
+// SERVER MESSAGE ROUTER
+// =========================
+function handleServerMessage(msg) {
 
   if (!msg) return;
 
   // =========================
-  // IMU STREAM (drives field distortion)
+  // 1. IMU STREAM (DRIVES FIELD + MOTION)
   // =========================
-  if (msg.type === "imu" && msg.data) {
+  if (msg.type === "imu") {
 
     buffer.add({
       x: msg.data.x,
@@ -38,71 +41,79 @@ connect((msg) => {
       z: msg.data.z
     });
 
-    // 🔥 FEED GRID DISTORTION
-    const intensity = Math.min(
-      1.0,
-      Math.abs(msg.data.x) + Math.abs(msg.data.y) + Math.abs(msg.data.z)
-    );
+    // 🔥 GRID RESPONSE
+    const intensity =
+      Math.abs(msg.data.x) +
+      Math.abs(msg.data.y) +
+      Math.abs(msg.data.z);
 
-    grid.setIntensity(0.6 + intensity * 0.4);
-    grid.setDistortion(intensity * 0.08);
+    grid.setIntensity(0.6 + intensity * 0.2);
+    grid.setDistortion(intensity * 0.05);
+
+    return;
   }
 
   // =========================
-  // PATH POINT STREAM
+  // 2. PATH STREAM (TRACE HISTORY)
   // =========================
   if (msg.type === "path_point") {
+
     buffer.add({
       x: msg.x,
       y: msg.y,
       z: msg.z
     });
 
-    // subtle spatial ripple
-    grid.setDistortion(0.15);
-  }
-
-  // =========================
-  // ANCHOR UPDATE
-  // =========================
-  if (msg.type === "anchor") {
-    anchor = msg.anchor || anchor;
-    coord.setAnchor(anchor);
-
-    // stabilize field on anchor lock
-    grid.setDistortion(0.0);
-    grid.setIntensity(1.0);
+    grid.setDistortion(0.12);
 
     return;
   }
 
   // =========================
-  // RENDER PIPELINE
+  // 3. ANCHOR (WORLD LOCK)
   // =========================
-  const rawPoints = buffer.getPositions();
-  if (rawPoints.length < 2) return;
+  if (msg.type === "anchor") {
 
-  const worldPoints = coord.transformArray(rawPoints);
-  const smoothed = worldPoints.map(p => smoother.update(p));
+    anchor = msg.anchor || anchor;
+    coord.setAnchor(anchor);
 
-  for (let i = 1; i < smoothed.length; i++) {
-    const v = flow.addMotion(smoothed[i - 1], smoothed[i]);
-    renderer.addVector(v);
+    // stabilize entire system
+    grid.setDistortion(0.0);
+    grid.setIntensity(1.0);
+
+    return;
   }
-});
+}
 
 // =========================
-// RENDER LOOP (GRID UPDATE ADDED)
+// RENDER PIPELINE LOOP
 // =========================
 let last = performance.now();
 
 function loop() {
+
   const now = performance.now();
   const dt = (now - last) / 1000;
   last = now;
 
-  // 🔥 UPDATE GRID SHADER
+  // 🔥 GPU FIELD UPDATE
   grid.update(dt);
+
+  // =========================
+  // VECTOR PIPELINE
+  // =========================
+  const rawPoints = buffer.getPositions();
+
+  if (rawPoints.length > 1) {
+
+    const worldPoints = coord.transformArray(rawPoints);
+    const smoothed = worldPoints.map(p => smoother.update(p));
+
+    for (let i = 1; i < smoothed.length; i++) {
+      const v = flow.addMotion(smoothed[i - 1], smoothed[i]);
+      renderer.addVector(v);
+    }
+  }
 
   renderer.render();
   requestAnimationFrame(loop);
