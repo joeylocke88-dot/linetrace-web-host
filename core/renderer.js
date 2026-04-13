@@ -94,6 +94,14 @@ export class Renderer {
 
     this.renderer.render(this.scene, this.camera);
   }
+addEddy(point) {
+  const geo = new THREE.SphereGeometry(0.05);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff3300 });
 
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(point.x, point.y, point.z);
+
+  this.scene.add(mesh);
+}
   /**
    * Resize-safe
