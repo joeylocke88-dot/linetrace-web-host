@@ -11,6 +11,13 @@ const buffer = new TraceBuffer();
 const coord = new CoordinateSystem();
 const smoother = new Smoother(0.2);
 const flow = new Flow();
+const graph = {
+  nodes: new Map(),
+  last: {
+    imu: null,
+    path: null
+  }
+};
 
 // 🔥 GPU FIELD
 const grid = new GridShader(renderer.scene);
@@ -35,40 +42,68 @@ function handleServerMessage(msg) {
   // =========================
   if (msg.type === "imu") {
 
-    buffer.add({
-      x: msg.data.x,
-      y: msg.data.y,
-      z: msg.data.z
+  const node = {
+    type: "imu",
+    pos: msg.data,
+    time: performance.now(),
+    edges: []
+  };
+
+  // compute delta edge (Cayley-style local transform)
+  if (graph.last.imu) {
+    node.edges.push({
+      dx: msg.data.x - graph.last.imu.x,
+      dy: msg.data.y - graph.last.imu.y,
+      dz: msg.data.z - graph.last.imu.z
     });
-
-    // 🔥 GRID RESPONSE
-    const intensity =
-      Math.abs(msg.data.x) +
-      Math.abs(msg.data.y) +
-      Math.abs(msg.data.z);
-
-    grid.setIntensity(0.6 + intensity * 0.2);
-    grid.setDistortion(intensity * 0.05);
-
-    return;
   }
 
+  graph.last.imu = msg.data;
+
+  graph.nodes.set(node.time, node);
+
+  buffer.add(msg.data);
+
+  const intensity =
+    Math.abs(msg.data.x) +
+    Math.abs(msg.data.y) +
+    Math.abs(msg.data.z);
+
+  grid.setIntensity(0.6 + intensity * 0.2);
+  grid.setDistortion(intensity * 0.05);
+
+  return;
+}
   // =========================
   // 2. PATH STREAM (TRACE HISTORY)
   // =========================
-  if (msg.type === "path_point") {
+if (msg.type === "path_point") {
 
-    buffer.add({
-      x: msg.x,
-      y: msg.y,
-      z: msg.z
+  const node = {
+    type: "path",
+    pos: { x: msg.x, y: msg.y, z: msg.z },
+    time: performance.now(),
+    edges: []
+  };
+
+  if (graph.last.path) {
+    node.edges.push({
+      dx: msg.x - graph.last.path.x,
+      dy: msg.y - graph.last.path.y,
+      dz: msg.z - graph.last.path.z
     });
-
-    grid.setDistortion(0.12);
-
-    return;
   }
 
+  graph.last.path = { x: msg.x, y: msg.y, z: msg.z };
+
+  graph.nodes.set(node.time, node);
+
+  buffer.add(node.pos);
+
+  grid.setDistortion(0.12);
+
+  return;
+}
   // =========================
   // 3. ANCHOR (WORLD LOCK)
   // =========================
