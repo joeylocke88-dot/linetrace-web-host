@@ -1,3 +1,21 @@
+const fs = require("fs");
+
+const WORLD_FILE = "./world_state.json";
+function loadWorldState() {
+  try {
+    if (fs.existsSync(WORLD_FILE)) {
+      const data = JSON.parse(fs.readFileSync(WORLD_FILE, "utf8"));
+      return data;
+    }
+  } catch (e) {
+    console.log("World load failed, using default.");
+  }
+
+  return {
+    anchor: { x: 0, y: 0, z: 0 },
+    version: 1
+  };
+}
 const http = require('http');
 const WebSocket = require('ws');
 
@@ -21,10 +39,17 @@ const rooms = new Map();
 // =========================
 // SHARED WORLD STATE
 // =========================
-const worldState = {
-  anchor: { x: 0, y: 0, z: 0 },
-  version: 1
-};
+const worldState = loadWorldState();
+function saveWorldState() {
+  try {
+    fs.writeFileSync(
+      WORLD_FILE,
+      JSON.stringify(worldState, null, 2)
+    );
+  } catch (e) {
+    console.log("World save failed:", e.message);
+  }
+}
 
 // =========================
 // HEARTBEAT
@@ -108,6 +133,14 @@ wss.on('connection', (ws, req) => {
         worldState.version++;
       }
 
+       saveWorldState(); // 🔥 PERSIST HERE
+      process.on("SIGTERM", () => {
+  saveWorldState();
+  server.close(() => {
+    console.log("Server shutdown cleanly");
+  });
+});
+      
       broadcast(room, {
         type: "anchor",
         anchor: worldState.anchor,
