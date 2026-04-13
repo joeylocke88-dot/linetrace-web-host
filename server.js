@@ -1,10 +1,17 @@
-const WebSocket = require('ws');
-const http = require('http');
+// server.js - Render-safe stable WebSocket server
 
+const http = require('http');
+const WebSocket = require('ws');
+
+const PORT = process.env.PORT || 10000;
+
+// =========================
+// HTTP SERVER (Render health check)
+// =========================
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url.startsWith('/?')) {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('LineTrace WebSocket Server running\n');
+    res.end('LineTrace WebSocket Server Running\n');
     return;
   }
 
@@ -12,30 +19,32 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocket.Server({
-  server,
-  path: '/'
-});
+// =========================
+// WEBSOCKET SERVER (IMPORTANT: NO path restriction)
+// =========================
+const wss = new WebSocket.Server({ server });
 
+// Room storage
 const rooms = new Map();
 
 // =========================
-// HEARTBEAT (prevents zombie sockets)
+// HEARTBEAT (prevents silent disconnects)
 // =========================
 function heartbeat() {
   this.isAlive = true;
 }
 
-setInterval(() => {
+const heartbeatInterval = setInterval(() => {
   for (const room of rooms.values()) {
     for (const client of room.values()) {
       if (!client.isAlive) {
         client.terminate();
         room.delete(client.user);
-      } else {
-        client.isAlive = false;
-        client.ping();
+        continue;
       }
+
+      client.isAlive = false;
+      client.ping();
     }
   }
 }, 30000);
@@ -44,37 +53,44 @@ setInterval(() => {
 // CONNECTION HANDLER
 // =========================
 wss.on('connection', (ws, req) => {
-
   ws.isAlive = true;
   ws.on('pong', heartbeat);
 
+  // SAFE URL PARSING (Render-safe)
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   const room = url.searchParams.get('room') || 'default';
-  const user = url.searchParams.get('user') ||
+  const user =
+    url.searchParams.get('user') ||
     'web_' + Math.random().toString(36).slice(2);
 
-  if (!rooms.has(room)) rooms.set(room, new Map());
+  // Create room if needed
+  if (!rooms.has(room)) {
+    rooms.set(room, new Map());
+  }
 
   const clients = rooms.get(room);
-  clients.set(user, ws);
-  ws.user = user;
 
-  console.log(`[${room}] ${user} joined`);
+  ws.user = user;
+  ws.room = room;
+
+  clients.set(user, ws);
+
+  console.log(`✅ [${room}] ${user} connected`);
 
   // =========================
-  // MESSAGE PIPELINE
+  // MESSAGE HANDLING
   // =========================
   ws.on('message', (raw) => {
     let msg;
 
     try {
       msg = JSON.parse(raw);
-    } catch {
+    } catch (err) {
       return;
     }
 
-    // basic validation
+    // Basic validation (prevents crashes)
     if (!msg || typeof msg !== 'object') return;
     if (!msg.point) return;
 
@@ -82,11 +98,11 @@ wss.on('connection', (ws, req) => {
     msg.room = room;
     msg.timestamp = Date.now();
 
-    // broadcast
+    // Broadcast to room
     for (const [id, client] of clients.entries()) {
       if (client.readyState !== WebSocket.OPEN) continue;
 
-      // optional: skip echo back to sender
+      // Skip sender (prevents echo spam)
       if (id === user) continue;
 
       client.send(JSON.stringify(msg));
@@ -102,9 +118,12 @@ wss.on('connection', (ws, req) => {
     if (clients.size === 0) {
       rooms.delete(room);
     }
+
+    console.log(`❌ [${room}] ${user} disconnected`);
   });
 
-  ws.on('error', () => {
+  ws.on('error', (err) => {
+    console.log(`⚠️ WS error: ${err.message}`);
     clients.delete(user);
   });
 });
@@ -112,8 +131,14 @@ wss.on('connection', (ws, req) => {
 // =========================
 // START SERVER
 // =========================
-const PORT = process.env.PORT || 10000;
-
 server.listen(PORT, () => {
-  console.log(`🚀 LineTrace server running on ${PORT}`);
+  console.log(`🚀 LineTrace server running on port ${PORT}`);
+});
+
+// Cleanup interval on shutdown
+process.on('SIGTERM', () => {
+  clearInterval(heartbeatInterval);
+  server.close(() => {
+    console.log('Server shutdown cleanly');
+  });
 });
