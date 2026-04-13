@@ -24,7 +24,7 @@ canvas {
 /* =========================
    SUBTLE GRID BACKGROUND
    ========================= */
-body::before {
+body:
   content: "";
   position: fixed;
   top: 0;
