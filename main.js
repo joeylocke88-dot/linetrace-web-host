@@ -3,6 +3,7 @@ import { TraceBuffer } from './core/traceBuffer.js';
 import { CoordinateSystem } from './core/coordinateSystem.js';
 import { Smoother } from './core/smoothing.js';
 import { connect } from './network/websocket.js';
+import { GridShader } from './core/gridShader.js';
 
 // optional missing dependency fix
 import { Flow } from './core/flow.js';
