@@ -17,6 +17,9 @@ const graph = {
     imu: null,
     path: null
   }
+  const ws = new WebSocket(
+  "wss://linetrace-web.onrender.com/?room=default&user=web_01"
+);
 };
 
 // 🔥 GPU FIELD
