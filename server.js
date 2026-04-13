@@ -21,11 +21,63 @@ const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 10000;
 
+const fs = require("fs");
+const path = require("path");
+
 const server = http.createServer((req, res) => {
-  if (req.url === '/' || req.url.startsWith('/?')) {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('LineTrace WebSocket Server Running\n');
+
+  // =========================
+  // 1. MAIN WEB APP ENTRY
+  // =========================
+  if (req.url === "/" || req.url === "/index.html") {
+
+    const filePath = path.join(__dirname, "public", "index.html");
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(500);
+        res.end("Missing index.html in /public");
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(data);
+    });
+
     return;
+  }
+
+  // =========================
+  // 2. STATIC FILES (JS / CSS / SHADERS)
+  // =========================
+  const filePath = path.join(__dirname, "public", req.url);
+
+  fs.readFile(filePath, (err, data) => {
+
+    if (err) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+
+    const ext = path.extname(filePath);
+
+    const types = {
+      ".js": "application/javascript",
+      ".css": "text/css",
+      ".html": "text/html",
+      ".glsl": "text/plain",
+      ".vert": "text/plain",
+      ".frag": "text/plain"
+    };
+
+    res.writeHead(200, {
+      "Content-Type": types[ext] || "text/plain"
+    });
+
+    res.end(data);
+  });
+});
   }
 
   res.writeHead(404);
