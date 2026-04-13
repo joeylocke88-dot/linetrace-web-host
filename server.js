@@ -1,13 +1,8 @@
-// server.js - Render-safe stable WebSocket server with shared world anchor
-
 const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 10000;
 
-// =========================
-// HTTP SERVER (Render health check)
-// =========================
 const server = http.createServer((req, res) => {
   if (req.url === '/' || req.url.startsWith('/?')) {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -19,36 +14,26 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
-// =========================
-// WEBSOCKET SERVER
-// =========================
 const wss = new WebSocket.Server({ server });
 
-// =========================
-// ROOM STORAGE
-// =========================
 const rooms = new Map();
 
 // =========================
-// SHARED WORLD STATE (ANCHOR AUTHORITY)
+// SHARED WORLD STATE
 // =========================
 const worldState = {
-  anchor: {
-    x: 0,
-    y: 0,
-    z: 0
-  },
+  anchor: { x: 0, y: 0, z: 0 },
   version: 1
 };
 
 // =========================
-// HEARTBEAT SYSTEM
+// HEARTBEAT
 // =========================
 function heartbeat() {
   this.isAlive = true;
 }
 
-const heartbeatInterval = setInterval(() => {
+setInterval(() => {
   for (const room of rooms.values()) {
     for (const client of room.values()) {
       if (!client.isAlive) {
@@ -64,30 +49,12 @@ const heartbeatInterval = setInterval(() => {
 }, 30000);
 
 // =========================
-// BROADCAST ANCHOR (future-safe)
-// =========================
-function broadcastAnchor() {
-  for (const room of rooms.values()) {
-    for (const client of room.values()) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({
-          type: "anchor",
-          anchor: worldState.anchor,
-          version: worldState.version
-        }));
-      }
-    }
-  }
-}
-
-// =========================
-// CONNECTION HANDLER
+// CONNECTION
 // =========================
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', heartbeat);
 
-  // Safe URL parsing (Render-compatible)
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   const room = url.searchParams.get('room') || 'default';
@@ -95,11 +62,7 @@ wss.on('connection', (ws, req) => {
     url.searchParams.get('user') ||
     'web_' + Math.random().toString(36).slice(2);
 
-  // Create room if needed
-  if (!rooms.has(room)) {
-    rooms.set(room, new Map());
-  }
-
+  if (!rooms.has(room)) rooms.set(room, new Map());
   const clients = rooms.get(room);
 
   ws.user = user;
@@ -109,9 +72,7 @@ wss.on('connection', (ws, req) => {
 
   console.log(`✅ [${room}] ${user} connected`);
 
-  // =========================
-  // SEND INITIAL ANCHOR (CRITICAL FIX)
-  // =========================
+  // Send initial anchor
   ws.send(JSON.stringify({
     type: "anchor",
     anchor: worldState.anchor,
@@ -119,7 +80,7 @@ wss.on('connection', (ws, req) => {
   }));
 
   // =========================
-  // MESSAGE HANDLING
+  // MESSAGE HANDLER (FIXED)
   // =========================
   ws.on('message', (raw) => {
     let msg;
@@ -132,106 +93,50 @@ wss.on('connection', (ws, req) => {
 
     if (!msg || typeof msg !== 'object') return;
 
-    // Only process spatial points
-    if (msg.type === "path_point" && msg.point) {
-      msg.user = user;
-      msg.room = room;
-      msg.timestamp = Date.now();
-       // =========================
-  // AR ANCHOR MESSAGE (NEW)
-  // =========================
-  if (msg.type === "ar_anchor") {
+    msg.user = user;
+    msg.room = room;
+    msg.timestamp = Date.now();
 
-    for (const [id, client] of clients.entries()) {
-      if (client.readyState !== WebSocket.OPEN) continue;
+    // =========================
+    // AR ANCHOR (FIXED)
+    // =========================
+    if (msg.type === "ar_anchor") {
 
-      client.send(JSON.stringify({
-        type: "ar_anchor",
-        user,
-        room,
-        anchor: msg.anchor,
-        timestamp: msg.timestamp
-      }));
-    }
-
-    return; // IMPORTANT: prevents double broadcast
-  }
-
-  // =========================
-  // IMU MESSAGE (optional keep)
-  // =========================
-  if (msg.type === "imu") {
-    for (const [id, client] of clients.entries()) {
-      if (client.readyState !== WebSocket.OPEN) continue;
-
-      client.send(JSON.stringify(msg));
-    }
-    return;
-  }
-
-  // =========================
-  // DEFAULT BROADCAST (other data)
-  // =========================
-  for (const [id, client] of clients.entries()) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    client.send(JSON.stringify(msg));
-  }
-});
-🧠 WHY THIS MATTERS
-
-Without this separation:
-
-anchors get mixed with IMU noise
-clients overwrite world origin incorrectly
-drift correction becomes unstable
-
-With this:
-
-✔ AR anchors = authoritative world structure
-✔ IMU = motion detail only
-✔ other messages = general sync
-🚀 NEXT STEP (if you want to go further)
-
-Right now your system is:
-
-shared AR world + IMU motion stream
-
-Next upgrade is:
-
-🔥 “anchor reconciliation layer”
-
-That makes:
-
-multiple phones agree on same origin
-prevents world sliding between users
-locks coordinate system globally
-
-Say:
-
-“add global anchor reconciliation”
-
-and I’ll take this into a true multi-device shared spatial system (like AR multiplayer physics alignment).
-
-      // broadcast to room
-      for (const [id, client] of clients.entries()) {
-        if (client.readyState !== WebSocket.OPEN) continue;
-        if (id === user) continue;
-
-        client.send(JSON.stringify(msg));
+      // update authoritative world anchor
+      if (msg.anchor) {
+        worldState.anchor = msg.anchor;
+        worldState.version++;
       }
+
+      broadcast(room, {
+        type: "anchor",
+        anchor: worldState.anchor,
+        version: worldState.version
+      });
+
+      return;
+    }
+
+    // =========================
+    // IMU STREAM
+    // =========================
+    if (msg.type === "imu") {
+      broadcast(room, msg);
+      return;
+    }
+
+    // =========================
+    // PATH DATA
+    // =========================
+    if (msg.type === "path_point") {
+      broadcast(room, msg);
+      return;
     }
   });
 
-  // =========================
-  // CLEANUP
-  // =========================
   ws.on('close', () => {
     clients.delete(user);
-
-    if (clients.size === 0) {
-      rooms.delete(room);
-    }
-
+    if (clients.size === 0) rooms.delete(room);
     console.log(`❌ [${room}] ${user} disconnected`);
   });
 
@@ -242,18 +147,22 @@ and I’ll take this into a true multi-device shared spatial system (like AR mul
 });
 
 // =========================
-// START SERVER
+// BROADCAST HELPER
+// =========================
+function broadcast(room, msg) {
+  const clients = rooms.get(room);
+  if (!clients) return;
+
+  for (const client of clients.values()) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(msg));
+    }
+  }
+}
+
+// =========================
+// START
 // =========================
 server.listen(PORT, () => {
   console.log(`🚀 LineTrace server running on port ${PORT}`);
-});
-
-// =========================
-// SHUTDOWN CLEANUP
-// =========================
-process.on('SIGTERM', () => {
-  clearInterval(heartbeatInterval);
-  server.close(() => {
-    console.log('Server shutdown cleanly');
-  });
 });
