@@ -25,7 +25,10 @@ connect((sample) => {
   const smoothed = worldPoints.map(p => smoother.update(p));
 
   // 5. Render
-  renderer.updatePoints(smoothed);
+  for (let i = 1; i < smoothed.length; i++) {
+  const v = flow.addMotion(smoothed[i-1], smoothed[i]);
+  renderer.addVector(v);
+}
 });
 
 // Start render loop
