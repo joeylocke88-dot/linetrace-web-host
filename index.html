@@ -150,7 +150,10 @@
     ws.onerror = () => log("WebSocket error");
     ws.onclose = () => log("Disconnected");
   }
-
+ws.send(JSON.stringify({
+  type: "anchor",
+  anchor: globalAnchor
+}));
   // =========================
   // PATH HANDLING (GPU SAFE)
   // =========================
