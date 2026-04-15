@@ -1,6 +1,14 @@
 const fs = require("fs");
+const path = require("path");
+const http = require("http");
+const WebSocket = require("ws");
 
+const PORT = process.env.PORT || 10000;
 const WORLD_FILE = "./world_state.json";
+
+// =========================
+// SHARED WORLD STATE
+// =========================
 function loadWorldState() {
   try {
     if (fs.existsSync(WORLD_FILE)) {
@@ -8,246 +16,222 @@ function loadWorldState() {
       return data;
     }
   } catch (e) {
-    console.log("World load failed, using default.");
+    console.error("World load failed, using default:", e.message);
   }
-
   return {
     anchor: { x: 0, y: 0, z: 0 },
-    version: 1
+    version: 1,
   };
 }
-const http = require('http');
-const WebSocket = require('ws');
 
-const PORT = process.env.PORT || 10000;
+const worldState = loadWorldState();
 
-const fs = require("fs");
-const path = require("path");
+function saveWorldState() {
+  try {
+    fs.writeFileSync(WORLD_FILE, JSON.stringify(worldState, null, 2));
+    console.log("💾 World state saved");
+  } catch (e) {
+    console.error("World save failed:", e.message);
+  }
+}
 
+// Graceful shutdown
+function gracefulShutdown() {
+  console.log("🛑 Shutting down server...");
+  saveWorldState();
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.close(1001, "Server shutting down");
+    }
+  });
+  server.close(() => {
+    console.log("✅ Server closed cleanly");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
+
+// =========================
+// HTTP SERVER + STATIC FILES
+// =========================
 const server = http.createServer((req, res) => {
-
-  // =========================
-  // 1. MAIN WEB APP ENTRY
-  // =========================
+  // Root → serve index.html
   if (req.url === "/" || req.url === "/index.html") {
-
     const filePath = path.join(__dirname, "public", "index.html");
-
     fs.readFile(filePath, (err, data) => {
       if (err) {
         res.writeHead(500);
-        res.end("Missing index.html in /public");
+        res.end("Missing index.html in /public folder");
         return;
       }
-
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(data);
     });
-
     return;
   }
 
-  // =========================
-  // 2. STATIC FILES (JS / CSS / SHADERS)
-  // =========================
-  const filePath = path.join(__dirname, "public", req.url);
+  // Static files (JS, CSS, GLSL shaders, etc.)
+  let filePath = path.join(__dirname, "public", req.url);
+  
+  // Security: prevent directory traversal
+  if (!filePath.startsWith(path.join(__dirname, "public"))) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
 
   fs.readFile(filePath, (err, data) => {
-
     if (err) {
       res.writeHead(404);
       res.end("Not found");
       return;
     }
 
-    const ext = path.extname(filePath);
-
-    const types = {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes = {
       ".js": "application/javascript",
+      ".mjs": "application/javascript",
       ".css": "text/css",
       ".html": "text/html",
+      ".json": "application/json",
       ".glsl": "text/plain",
       ".vert": "text/plain",
-      ".frag": "text/plain"
+      ".frag": "text/plain",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".svg": "image/svg+xml",
     };
 
     res.writeHead(200, {
-      "Content-Type": types[ext] || "text/plain"
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
     });
-
     res.end(data);
   });
 });
-  }
 
-  res.writeHead(404);
-  res.end();
-});
-
+// =========================
+// WEB SOCKET SERVER
+// =========================
 const wss = new WebSocket.Server({ server });
 
-const rooms = new Map();
+const rooms = new Map(); // roomName → Map<user, ws>
 
-// =========================
-// SHARED WORLD STATE
-// =========================
-const worldState = loadWorldState();
-function saveWorldState() {
-  try {
-    fs.writeFileSync(
-      WORLD_FILE,
-      JSON.stringify(worldState, null, 2)
-    );
-  } catch (e) {
-    console.log("World save failed:", e.message);
-  }
-}
-
-// =========================
-// HEARTBEAT
-// =========================
+// Heartbeat (prevent stale connections)
 function heartbeat() {
   this.isAlive = true;
 }
 
-setInterval(() => {
-  for (const room of rooms.values()) {
-    for (const client of room.values()) {
-      if (!client.isAlive) {
-        client.terminate();
-        room.delete(client.user);
-        continue;
-      }
-
-      client.isAlive = false;
-      client.ping();
-    }
-  }
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
 }, 30000);
 
-// =========================
-// CONNECTION
-// =========================
-wss.on('connection', (ws, req) => {
+wss.on("connection", (ws, req) => {
   ws.isAlive = true;
-  ws.on('pong', heartbeat);
+  ws.on("pong", heartbeat);
 
   const url = new URL(req.url, `http://${req.headers.host}`);
-
-  const room = url.searchParams.get('room') || 'default';
-  const user =
-    url.searchParams.get('user') ||
-    'web_' + Math.random().toString(36).slice(2);
+  const room = url.searchParams.get("room") || "default";
+  let user = url.searchParams.get("user") || `web_${Math.random().toString(36).slice(2, 10)}`;
 
   if (!rooms.has(room)) rooms.set(room, new Map());
   const clients = rooms.get(room);
 
+  // Avoid duplicate user in same room
+  if (clients.has(user)) {
+    user = `${user}_${Date.now().toString(36)}`;
+  }
+
   ws.user = user;
   ws.room = room;
-
   clients.set(user, ws);
 
-  console.log(`✅ [${room}] ${user} connected`);
+  console.log(`✅ [${room}] ${user} connected (${clients.size} total)`);
 
-  // Send initial anchor
-  ws.send(JSON.stringify({
-    type: "anchor",
-    anchor: worldState.anchor,
-    version: worldState.version
-  }));
+  // Send current authoritative anchor
+  ws.send(
+    JSON.stringify({
+      type: "anchor",
+      anchor: worldState.anchor,
+      version: worldState.version,
+    })
+  );
 
-  // =========================
-  // MESSAGE HANDLER (FIXED)
-  // =========================
-  ws.on('message', (raw) => {
+  ws.on("message", (raw) => {
     let msg;
-
     try {
       msg = JSON.parse(raw);
-    } catch {
+    } catch (e) {
       return;
     }
-
-    if (!msg || typeof msg !== 'object') return;
+    if (!msg || typeof msg !== "object") return;
 
     msg.user = user;
     msg.room = room;
     msg.timestamp = Date.now();
 
-    // =========================
-    // AR ANCHOR (FIXED)
-    // =========================
     if (msg.type === "ar_anchor") {
-
-      // update authoritative world anchor
       if (msg.anchor) {
         worldState.anchor = msg.anchor;
         worldState.version++;
+        saveWorldState(); // Persist immediately
       }
 
-       saveWorldState(); // 🔥 PERSIST HERE
-      process.on("SIGTERM", () => {
-  saveWorldState();
-  server.close(() => {
-    console.log("Server shutdown cleanly");
-  });
-});
-      
+      // Broadcast updated anchor to everyone in room
       broadcast(room, {
         type: "anchor",
         anchor: worldState.anchor,
-        version: worldState.version
+        version: worldState.version,
       });
-
       return;
     }
 
-    // =========================
-    // IMU STREAM
-    // =========================
-    if (msg.type === "imu") {
-      broadcast(room, msg);
+    if (msg.type === "imu" || msg.type === "path_point") {
+      broadcast(room, msg); // Real-time forwarding
       return;
     }
 
-    // =========================
-    // PATH DATA
-    // =========================
-    if (msg.type === "path_point") {
-      broadcast(room, msg);
-      return;
-    }
+    // Add more message types here as needed (e.g. chat, user transform, etc.)
   });
 
-  ws.on('close', () => {
+  ws.on("close", () => {
     clients.delete(user);
     if (clients.size === 0) rooms.delete(room);
-    console.log(`❌ [${room}] ${user} disconnected`);
+    console.log(`❌ [${room}] ${user} disconnected (${clients.size} remaining)`);
   });
 
-  ws.on('error', (err) => {
-    console.log(`⚠️ WS error: ${err.message}`);
+  ws.on("error", (err) => {
+    console.error(`⚠️ WS error for ${user}:`, err.message);
     clients.delete(user);
   });
 });
 
-// =========================
-// BROADCAST HELPER
-// =========================
+// Broadcast helper
 function broadcast(room, msg) {
   const clients = rooms.get(room);
   if (!clients) return;
 
+  const payload = JSON.stringify(msg);
   for (const client of clients.values()) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(msg));
+      client.send(payload);
     }
   }
 }
 
 // =========================
-// START
+// START SERVER
 // =========================
 server.listen(PORT, () => {
-  console.log(`🚀 LineTrace server running on port ${PORT}`);
+  console.log(`🚀 LineTrace server running on http://localhost:${PORT}`);
+  console.log(`   WebSocket ready for AR shared world`);
 });
+
+// Cleanup interval on shutdown
+process.on("SIGTERM", () => clearInterval(interval));
+process.on("SIGINT", () => clearInterval(interval));
