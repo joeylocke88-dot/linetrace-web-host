@@ -34,6 +34,33 @@
       font-size: 12px;
     }
 
+    .legend {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #ddd;
+    }
+
+    .legend .item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+    }
+
+    .legend .marker {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .legend .axis-x { background: #ff0000; }
+    .legend .axis-y { background: #00ff00; }
+    .legend .axis-z { background: #0000ff; }
+    .legend .plane { background: rgba(0, 136, 255, 0.75); }
+    .legend .pose { background: #ff6600; }
+
     input, button {
       margin: 4px 0;
     }
@@ -50,6 +77,14 @@
 
   <button onclick="joinRoom()">Join Room</button>
   <button onclick="startAR()">Enter AR</button>
+
+  <div class="legend">
+    <div class="item"><span class="marker pose"></span>Device pose</div>
+    <div class="item"><span class="marker axis-x"></span>X axis</div>
+    <div class="item"><span class="marker axis-y"></span>Y axis</div>
+    <div class="item"><span class="marker axis-z"></span>Z axis</div>
+    <div class="item"><span class="marker plane"></span>Vertical plane</div>
+  </div>
 </div>
 
 <div id="status"></div>
@@ -60,10 +95,13 @@
   // =========================
 
   let scene, camera, renderer;
+  let worldRoot = null;
   let ws = null;
 
   let currentRoom = "default";
   const paths = new Map();
+  const poseMarkers = new Map();
+  const planeMarkers = new Map();
 
   const MAX_POINTS = 2000;
 
@@ -82,6 +120,9 @@
 
   async function init() {
     scene = new THREE.Scene();
+
+    worldRoot = new THREE.Group();
+    scene.add(worldRoot);
 
     camera = new THREE.PerspectiveCamera(
       70,
@@ -130,32 +171,46 @@
 
     if (ws) ws.close();
 
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const host = window.location.host;
+
     ws = new WebSocket(
-      `wss://linetrace-server-5vj2.onrender.com?room=${currentRoom}&user=web_${Math.random().toString(36).slice(2)}`
+      `${protocol}://${host}/?room=${currentRoom}&user=web_${Math.random().toString(36).slice(2)}`
     );
 
     ws.onopen = () => {
       log(`Connected → Room: ${currentRoom}`);
     };
 
-    ws.onmessage = (e) => {if (msg.type === "anchor") {
-  coord.setOrigin(msg.anchor);
-}
+    ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === "path_point") handlePathPoint(msg);
+        console.log(`📥 [${msg.type || 'unknown'}]`, msg);
+
+        if (msg.type === 'anchor' && msg.anchor) {
+          if (worldRoot) {
+            worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
+          }
+        }
+
+        if (msg.type === 'path_point') handlePathPoint(msg);
+        if (msg.type === 'pose') handlePose(msg);
+        if (msg.type === 'ar_vertical_plane') handleVerticalPlane(msg);
       } catch (err) {
-        console.warn("Bad message", err);
+        console.warn('Bad message', err, e.data);
       }
     };
 
-    ws.onerror = () => log("WebSocket error");
-    ws.onclose = () => log("Disconnected");
+    ws.onerror = (event) => {
+      console.warn('WebSocket connection error', event);
+      log('WebSocket connection failed');
+    };
+
+    ws.onclose = () => {
+      log('WebSocket disconnected');
+    };
   }
-ws.send(JSON.stringify({
-  type: "anchor",
-  anchor: globalAnchor
-}));
+
   // =========================
   // PATH HANDLING (GPU SAFE)
   // =========================
@@ -185,7 +240,7 @@ ws.send(JSON.stringify({
         index: 0
       };
 
-      scene.add(mesh);
+      worldRoot.add(mesh);
       paths.set(msg.user, line);
     }
 
@@ -194,7 +249,7 @@ ws.send(JSON.stringify({
 
     const i = obj.index * 3;
 
-    const p = msg.point || { x: 0, y: 0, z: 0 };
+    const p = msg.point || { x: msg.x || 0, y: msg.y || 0, z: msg.z || 0 };
 
     // Write point into buffer
     array[i] = p.x;
@@ -204,6 +259,80 @@ ws.send(JSON.stringify({
     obj.index = (obj.index + 1) % MAX_POINTS;
 
     obj.mesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+  function handlePose(msg) {
+    if (!msg.state || !msg.state.pos) return;
+
+    const user = msg.user || msg.node || 'device_ar';
+    let marker = poseMarkers.get(user);
+
+    if (!marker) {
+      marker = new THREE.Group();
+
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0xff6600 })
+      );
+      sphere.position.set(0, 0, 0);
+      marker.add(sphere);
+
+      const axisLength = 0.5;
+      const createAxis = (color, dir) => {
+        const material = new THREE.LineBasicMaterial({ color });
+        const geometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(dir.x * axisLength, dir.y * axisLength, dir.z * axisLength),
+        ]);
+        return new THREE.Line(geometry, material);
+      };
+
+      marker.add(createAxis(0xff0000, { x: 1, y: 0, z: 0 }));
+      marker.add(createAxis(0x00ff00, { x: 0, y: 1, z: 0 }));
+      marker.add(createAxis(0x0000ff, { x: 0, y: 0, z: 1 }));
+
+      worldRoot.add(marker);
+      poseMarkers.set(user, marker);
+    }
+
+    marker.position.set(
+      msg.state.pos.x || 0,
+      msg.state.pos.y || 0,
+      msg.state.pos.z || 0
+    );
+
+    if (msg.state.rot) {
+      marker.quaternion.set(
+        msg.state.rot.x || 0,
+        msg.state.rot.y || 0,
+        msg.state.rot.z || 0,
+        msg.state.rot.w != null ? msg.state.rot.w : 1
+      );
+    }
+  }
+
+  function handleVerticalPlane(msg) {
+    if (!msg.pos || typeof msg.height !== 'number') return;
+
+    const id = msg.user || `${msg.type}_${msg.timestamp || Date.now()}`;
+    let plane = planeMarkers.get(id);
+
+    if (!plane) {
+      const geometry = new THREE.PlaneGeometry(1, 1);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0x0088ff,
+        transparent: true,
+        opacity: Math.min(Math.max(msg.alpha ?? 0.25, 0.1), 0.85),
+        side: THREE.DoubleSide,
+      });
+      plane = new THREE.Mesh(geometry, material);
+      plane.rotation.x = Math.PI / 2;
+      worldRoot.add(plane);
+      planeMarkers.set(id, plane);
+    }
+
+    plane.position.set(msg.pos.x || 0, (msg.height / 2) || 0.5, msg.pos.z || 0);
+    plane.scale.set(1, msg.height || 1, 1);
   }
 
   // =========================

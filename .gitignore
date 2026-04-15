@@ -1,6 +1,9 @@
 # Ignore saved world state
-textworld_state.json
 world_state.json
 
 # Ignore installed node modules
 node_modules/
+
+# Ignore generated logs
+npm-debug.log*
+.DS_Store

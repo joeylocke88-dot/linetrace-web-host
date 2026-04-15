@@ -4,7 +4,8 @@ const http = require("http");
 const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 10000;
-const WORLD_FILE = "./world_state.json";
+const PUBLIC_DIR = path.join(__dirname, "public");
+const WORLD_FILE = path.join(__dirname, "world_state.json");
 
 // =========================
 // SHARED WORLD STATE
@@ -57,48 +58,52 @@ process.on("SIGINT", gracefulShutdown);
 // HTTP SERVER + STATIC FILES (from public/)
 // =========================
 const server = http.createServer((req, res) => {
-  let filePath;
+  const urlPath = decodeURIComponent(new URL(req.url || "/", `http://${req.headers.host}`).pathname);
+  let filePath = path.join(PUBLIC_DIR, urlPath === "/" ? "index.html" : urlPath);
+  filePath = path.resolve(filePath);
 
-  if (req.url === "/" || req.url === "/index.html") {
-    filePath = path.join(__dirname, "public", "index.html");
-  } else {
-    filePath = path.join(__dirname, "public", req.url);
-  }
-
-  // Security
-  if (!filePath.startsWith(path.join(__dirname, "public"))) {
+  if (!filePath.startsWith(PUBLIC_DIR + path.sep)) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
   }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
+  fs.stat(filePath, (err, stats) => {
+    if (err || !stats.isFile()) {
       console.error(`❌ 404: ${req.url} → ${filePath}`);
       res.writeHead(404);
       res.end(`Not found: ${req.url}`);
       return;
     }
 
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      ".js": "application/javascript",
-      ".mjs": "application/javascript",
-      ".css": "text/css",
-      ".html": "text/html",
-      ".json": "application/json",
-      ".glsl": "text/plain",
-      ".vert": "text/plain",
-      ".frag": "text/plain",
-      ".png": "image/png",
-      ".jpg": "image/jpeg",
-      ".svg": "image/svg+xml",
-    };
+    fs.readFile(filePath, (readErr, data) => {
+      if (readErr) {
+        console.error(`❌ Read error: ${req.url} → ${filePath}`);
+        res.writeHead(500);
+        res.end(`Server error reading ${req.url}`);
+        return;
+      }
 
-    res.writeHead(200, {
-      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes = {
+        ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".css": "text/css",
+        ".html": "text/html",
+        ".json": "application/json",
+        ".glsl": "text/plain",
+        ".vert": "text/plain",
+        ".frag": "text/plain",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".svg": "image/svg+xml",
+      };
+
+      res.writeHead(200, {
+        "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      });
+      res.end(data);
     });
-    res.end(data);
   });
 });
 
@@ -182,7 +187,12 @@ wss.on("connection", (ws, req) => {
       return;
     }
 
-    if (msg.type === "imu" || msg.type === "path_point") {
+    if (
+      msg.type === "imu" ||
+      msg.type === "path_point" ||
+      msg.type === "pose" ||
+      msg.type === "ar_vertical_plane"
+    ) {
       broadcast(room, msg); // Real-time forwarding
       return;
     }
