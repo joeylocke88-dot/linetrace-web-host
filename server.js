@@ -171,7 +171,7 @@ wss.on("connection", (ws, req) => {
     msg.room = room;
     msg.timestamp = Date.now();
 
-    if (msg.type === "ar_anchor") {
+    if (msg.type === "anchor" || msg.type === "ar_anchor") {
       if (msg.anchor) {
         worldState.anchor = msg.anchor;
         worldState.version++;

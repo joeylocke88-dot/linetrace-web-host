@@ -1,6 +1,6 @@
 # LineTrace Web Host
 
-A lightweight Node.js host for a shared AR world that receives real-time `path_point`, `imu`, and `anchor` messages over WebSocket.
+A lightweight Node.js host for a shared AR world that receives real-time `path_point`, `imu`, `anchor`, and `ar_anchor` messages over WebSocket.
 
 ## Quick start
 
@@ -22,11 +22,12 @@ A lightweight Node.js host for a shared AR world that receives real-time `path_p
 - `server.js` serves static files from `public/`.
 - It also creates a WebSocket server that handles multiple rooms.
 - Messages supported from clients:
-  - `type: "anchor"` → updates the shared world anchor
+  - `type: "anchor"` or `type: "ar_anchor"` → updates the shared world anchor
   - `type: "imu"` → forwards IMU data to room clients
   - `type: "path_point"` → forwards traced path points to room clients
-- `type: "pose"` → forwards device pose updates for rendering
-- `type: "ar_vertical_plane"` → forwards plane placement info for visualization
+  - `type: "pose"` → forwards device pose updates for rendering
+  - `type: "ar_vertical_plane"` → forwards plane placement info for visualization
+
 The Android app should connect to the WebSocket with a query string like:
 
 ```text
