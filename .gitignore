@@ -1,0 +1,5 @@
+# Ignore saved world state
+textworld_state.json
+
+# Ignore installed node modules
+node_modules/
