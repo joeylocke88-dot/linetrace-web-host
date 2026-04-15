@@ -54,28 +54,18 @@ process.on("SIGTERM", gracefulShutdown);
 process.on("SIGINT", gracefulShutdown);
 
 // =========================
-// HTTP SERVER + STATIC FILES
+// HTTP SERVER + STATIC FILES (from public/)
 // =========================
 const server = http.createServer((req, res) => {
-  // Root → serve index.html
+  let filePath;
+
   if (req.url === "/" || req.url === "/index.html") {
-    const filePath = path.join(__dirname, "public", "index.html");
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(500);
-        res.end("Missing index.html in /public folder");
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(data);
-    });
-    return;
+    filePath = path.join(__dirname, "public", "index.html");
+  } else {
+    filePath = path.join(__dirname, "public", req.url);
   }
 
-  // Static files (JS, CSS, GLSL shaders, etc.)
-  let filePath = path.join(__dirname, "public", req.url);
-  
-  // Security: prevent directory traversal
+  // Security
   if (!filePath.startsWith(path.join(__dirname, "public"))) {
     res.writeHead(403);
     res.end("Forbidden");
@@ -84,8 +74,9 @@ const server = http.createServer((req, res) => {
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
+      console.error(`❌ 404: ${req.url} → ${filePath}`);
       res.writeHead(404);
-      res.end("Not found");
+      res.end(`Not found: ${req.url}`);
       return;
     }
 
