@@ -103,5 +103,16 @@ addEddy(point) {
 
   this.scene.add(mesh);
 }
-  /**
-   * Resize-safe
+
+  addVector(v) {
+    const points = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(v.x, v.y, v.z)
+    ];
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color: 0xffffff });
+    const line = new THREE.Line(geometry, material);
+
+    this.scene.add(line);
+  }

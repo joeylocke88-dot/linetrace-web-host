@@ -1,25 +1,25 @@
+import * as THREE from 'three';
 import { Renderer } from './core/renderer.js';
 import { TraceBuffer } from './core/traceBuffer.js';
 import { CoordinateSystem } from './core/coordinateSystem.js';
 import { Smoother } from './core/smoothing.js';
+import { FlowField } from './core/flowField.js';
 import { connect } from './network/websocket.js';
 import { GridShader } from './core/gridShader.js';
-import { Flow } from './core/flow.js';
 
 const renderer = new Renderer();
+window.scene = renderer.scene;
+
 const buffer = new TraceBuffer();
 const coord = new CoordinateSystem();
 const smoother = new Smoother(0.2);
-const flow = new Flow();
+const flow = new FlowField();
 const graph = {
   nodes: new Map(),
   last: {
     imu: null,
     path: null
   }
-  const ws = new WebSocket(
-  "wss://linetrace-web.onrender.com/?room=default&user=web_01"
-);
 };
 
 // 🔥 GPU FIELD
@@ -31,59 +31,32 @@ let anchor = { x: 0, y: 0, z: 0 };
 // =========================
 // SERVER CONNECTION
 // =========================
-const ws = connect(handleServerMessage);
+connect(handleServerMessage);
 
 // =========================
-// SERVER MESSAGE ROUTER
+// LOGGING
 // =========================
-function handleServerMessage(msg) {
-
-  if (!msg) return;
-
-  // =========================
-  // 1. IMU STREAM (DRIVES FIELD + MOTION)
-  // =========================
-  if (msg.type === "imu") {
-
-  const node = {
-    type: "imu",
-    pos: msg.data,
-    time: performance.now(),
-    edges: []
-  };
-
-  // compute delta edge (Cayley-style local transform)
-  if (graph.last.imu) {
-    node.edges.push({
-      dx: msg.data.x - graph.last.imu.x,
-      dy: msg.data.y - graph.last.imu.y,
-      dz: msg.data.z - graph.last.imu.z
-    });
-  }
-
-  graph.last.imu = msg.data;
-
-  graph.nodes.set(node.time, node);
-
-  buffer.add(msg.data);
-
-  const intensity =
-    Math.abs(msg.data.x) +
-    Math.abs(msg.data.y) +
-    Math.abs(msg.data.z);
-
-  grid.setIntensity(0.6 + intensity * 0.2);
-  grid.setDistortion(intensity * 0.05);
-
-  return;
+function log(...args) {
+  console.log(...args);
 }
-  // =========================
-  // 2. PATH STREAM (TRACE HISTORY)
-  // =========================
-if (msg.type === "path_point") {
 
+function ensureWorldRoot() {
+  if (window.worldRoot) return;
+
+  window.worldRoot = new THREE.Group();
+  const children = [...renderer.scene.children];
+
+  children.forEach((child) => {
+    renderer.scene.remove(child);
+    window.worldRoot.add(child);
+  });
+
+  renderer.scene.add(window.worldRoot);
+}
+
+function handlePathPoint(msg) {
   const node = {
-    type: "path",
+    type: 'path',
     pos: { x: msg.x, y: msg.y, z: msg.z },
     time: performance.now(),
     edges: []
@@ -98,29 +71,70 @@ if (msg.type === "path_point") {
   }
 
   graph.last.path = { x: msg.x, y: msg.y, z: msg.z };
-
   graph.nodes.set(node.time, node);
 
-  buffer.add(node.pos);
-
+  buffer.add({ pos: [node.pos.x, node.pos.y, node.pos.z] });
   grid.setDistortion(0.12);
-
-  return;
 }
-  // =========================
-  // 3. ANCHOR (WORLD LOCK)
-  // =========================
-  if (msg.type === "anchor") {
 
-    anchor = msg.anchor || anchor;
-    coord.setAnchor(anchor);
+function handleServerMessage(msg) {
+  if (!msg) return;
 
-    // stabilize entire system
-    grid.setDistortion(0.0);
-    grid.setIntensity(1.0);
+  console.log(`📥 [${msg.type || 'unknown'}]`, msg);
 
+  if (msg.type === 'imu') {
+    const node = {
+      type: 'imu',
+      pos: msg.data,
+      time: performance.now(),
+      edges: []
+    };
+
+    if (graph.last.imu) {
+      node.edges.push({
+        dx: msg.data.x - graph.last.imu.x,
+        dy: msg.data.y - graph.last.imu.y,
+        dz: msg.data.z - graph.last.imu.z
+      });
+    }
+
+    graph.last.imu = msg.data;
+    graph.nodes.set(node.time, node);
+    buffer.add({ pos: [msg.data.x, msg.data.y, msg.data.z] });
+
+    const intensity =
+      Math.abs(msg.data.x) +
+      Math.abs(msg.data.y) +
+      Math.abs(msg.data.z);
+
+    grid.setIntensity(0.6 + intensity * 0.2);
+    grid.setDistortion(intensity * 0.05);
     return;
   }
+
+  if (msg.type === 'path_point') {
+    handlePathPoint(msg);
+    return;
+  }
+
+  if (msg.type === 'anchor') {
+    if (msg.anchor) {
+      ensureWorldRoot();
+      window.worldRoot.position.set(
+        msg.anchor.x || 0,
+        msg.anchor.y || 0,
+        msg.anchor.z || 0
+      );
+      anchor = msg.anchor;
+      log(`World anchor updated → X:${anchor.x.toFixed(2)} Y:${anchor.y.toFixed(2)} Z:${anchor.z.toFixed(2)}`);
+    }
+
+    grid.setDistortion(0.0);
+    grid.setIntensity(1.0);
+    return;
+  }
+
+  console.log('Unhandled message type:', msg.type);
 }
 
 // =========================
@@ -129,31 +143,27 @@ if (msg.type === "path_point") {
 let last = performance.now();
 
 function loop() {
-
   const now = performance.now();
   const dt = (now - last) / 1000;
   last = now;
 
-  // 🔥 GPU FIELD UPDATE
   grid.update(dt);
 
-  // =========================
-  // VECTOR PIPELINE
-  // =========================
   const rawPoints = buffer.getPositions();
 
   if (rawPoints.length > 1) {
-
     const worldPoints = coord.transformArray(rawPoints);
-    const smoothed = worldPoints.map(p => smoother.update(p));
+    const smoothed = worldPoints.map((p) => smoother.update(p));
 
     for (let i = 1; i < smoothed.length; i++) {
       const v = flow.addMotion(smoothed[i - 1], smoothed[i]);
-      renderer.addVector(v);
+      if (renderer.addVector) {
+        renderer.addVector(v);
+      }
     }
   }
 
-  renderer.render();
+  renderer.renderer.render(renderer.scene, renderer.camera);
   requestAnimationFrame(loop);
 }
 
