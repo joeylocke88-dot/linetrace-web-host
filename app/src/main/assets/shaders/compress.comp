@@ -1,0 +1,34 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+struct Surfel {
+    vec4 posRadius;   // 0-15: xyz, radius
+    vec4 normalConf;  // 16-31: xyz, confidence
+    vec4 color;       // 32-47: rgb, unused
+    uvec2 id;         // 48-55: 64-bit ID (low, high)
+    uvec2 timestamp;  // 56-63: 64-bit Timestamp (low, high)
+};
+
+layout(std430, binding = 0) buffer Surfels {
+    Surfel surfels[];
+};
+
+uniform uint uSurfelCount;
+uniform float uConfidenceThreshold;
+uniform float uMinRadius;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uSurfelCount) return;
+
+    // Prune low-confidence surfels
+    if (surfels[id].normalConf.w < uConfidenceThreshold) {
+        surfels[id].posRadius.w = 0.0; // Mark as invalid
+    }
+
+    // Merge logic would require a spatial pass (omitted for brevity)
+    // Here we just enforce a minimum radius for stability
+    if (surfels[id].posRadius.w > 0.0 && surfels[id].posRadius.w < uMinRadius) {
+        surfels[id].posRadius.w = uMinRadius;
+    }
+}

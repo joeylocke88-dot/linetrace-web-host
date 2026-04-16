@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootContainer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <android.opengl.GLSurfaceView
+        android:id="@+id/glView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <com.linetrace.app.ui.StabilityDashboard
+        android:id="@+id/dashboard"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <Button
+        android:id="@+id/btnCloseApp"
+        style="@style/TacticalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:text="@string/btn_close_app"
+        android:textSize="12sp"
+        android:backgroundTint="#88FF0000" />
+
+    <Button
+        android:id="@+id/btnSettings"
+        style="@style/TacticalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:text="@string/btn_config"
+        android:textSize="12sp"
+        android:backgroundTint="#8800FFFF" />
+
+    <!-- Trade Overlay -->
+    <LinearLayout
+        android:id="@+id/tradeOverlay"
+        android:layout_width="300dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone"
+        android:orientation="vertical"
+        android:background="#DD000000"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/tradeTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="INCOMING TRANSMISSION"
+            android:textColor="#00FFFF"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/tradeCredits"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Credits: 1000"
+            android:textColor="#FFFFFF"
+            android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/btnTradeAction"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="SELL NEBULA DUST (+500c)"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:textColor="#00FF00" />
+
+        <Button
+            android:id="@+id/btnCloseTrade"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="CLOSE COMMS"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:textColor="#FF0000" />
+    </LinearLayout>
+
+    <!-- Settings Overlay -->
+    <LinearLayout
+        android:id="@+id/settingsOverlay"
+        android:layout_width="300dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone"
+        android:orientation="vertical"
+        android:background="#DD000000"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VISUAL CONFIGURATION"
+            android:textColor="#00FFFF"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wall Height"
+            android:textColor="#FFFFFF"
+            android:layout_marginTop="16dp" />
+        <SeekBar
+            android:id="@+id/sbWallHeight"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progress="20" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wall Alpha"
+            android:textColor="#FFFFFF"
+            android:layout_marginTop="8dp" />
+        <SeekBar
+            android:id="@+id/sbWallAlpha"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progress="40" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Plane Alpha"
+            android:textColor="#FFFFFF"
+            android:layout_marginTop="8dp" />
+        <SeekBar
+            android:id="@+id/sbPlaneAlpha"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progress="15" />
+
+        <Button
+            android:id="@+id/btnCloseSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/btn_apply_close"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:textColor="#00FF00" />
+    </LinearLayout>
+
+    <!-- Bottom Controls -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="40dp"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="@drawable/tactical_gradient_overlay">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/btnRecord"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:text="@string/btn_rec" />
+
+            <Button
+                android:id="@+id/btnGhost"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:text="@string/btn_ghost" />
+
+            <Button
+                android:id="@+id/btnAnalyzeHistory"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:text="@string/btn_analyze_history" />
+
+            <ToggleButton
+                android:id="@+id/btnLock"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:textOn="@string/btn_lock"
+                android:textOff="@string/btn_lock" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/btnSync"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:textSize="12sp"
+                android:text="@string/btn_sync" />
+
+            <Button
+                android:id="@+id/btnRecover"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:textSize="12sp"
+                android:text="@string/btn_lazarus" />
+
+            <Button
+                android:id="@+id/btnReset"
+                style="@style/TacticalButton"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:textSize="12sp"
+                android:text="@string/btn_reset" />
+        </LinearLayout>
+    </LinearLayout>
+
+</FrameLayout>

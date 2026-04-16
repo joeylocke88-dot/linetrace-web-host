@@ -1,0 +1,36 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+struct Surfel {
+    vec4 posRadius;
+    vec4 normalConf;
+    vec4 color;
+    uvec2 id;
+    uvec2 timestamp;
+};
+
+layout(std430, binding = 0) buffer Surfels {
+    Surfel surfels[];
+};
+
+layout(std430, binding = 1) buffer BoundaryResults {
+    uint countOut;
+    uint indices[]; // Indices of surfels outside the "active" radius
+};
+
+uniform vec3 uCameraPos;
+uniform float uActiveRadius;
+uniform uint uSurfelCount;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uSurfelCount) return;
+
+    if (surfels[id].posRadius.w <= 0.0) return;
+
+    float dist = distance(surfels[id].posRadius.xyz, uCameraPos);
+    if (dist > uActiveRadius) {
+        uint idx = atomicAdd(countOut, 1u);
+        indices[idx] = id;
+    }
+}

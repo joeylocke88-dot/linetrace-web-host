@@ -1,0 +1,33 @@
+[versions]
+appcompat = "1.7.1"
+core = "1.53.0"
+coreKtx = "1.18.0"
+material = "1.13.0"
+junit = "4.13.2"
+mockito = "5.23.0"
+mockito-kotlin = "6.3.0"
+json = "20240303"
+play-services-nearby = "19.3.0"
+okhttp = "4.12.0"
+java-websocket = "1.5.3"
+androidx-xr-runtime = "1.0.0-alpha12"
+androidx-xr-scenecore = "1.0.0-alpha13"
+foundationLayout = "1.10.6"
+
+[libraries]
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-xr-arcore = { group = "androidx.xr.arcore", name = "arcore", version.ref = "androidx-xr-runtime" }
+androidx-xr-arcore-play-services = { group = "androidx.xr.arcore", name = "arcore-play-services", version.ref = "androidx-xr-runtime" }
+androidx-xr-runtime = { group = "androidx.xr.runtime", name = "runtime", version.ref = "androidx-xr-runtime" }
+androidx-xr-scenecore = { group = "androidx.xr.scenecore", name = "scenecore", version.ref = "androidx-xr-scenecore" }
+core = { group = "com.google.ar", name = "core", version.ref = "core" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+mockito-core = { group = "org.mockito", name = "mockito-core", version.ref = "mockito" }
+mockito-kotlin = { group = "org.mockito.kotlin", name = "mockito-kotlin", version.ref = "mockito-kotlin" }
+json = { group = "org.json", name = "json", version.ref = "json" }
+play-services-nearby = { group = "com.google.android.gms", name = "play-services-nearby", version.ref = "play-services-nearby" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+java-websocket-client = { group = "org.java-websocket", name = "Java-WebSocket", version.ref = "java-websocket" }
+androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }

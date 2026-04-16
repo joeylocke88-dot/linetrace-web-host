@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LineTrace • Shared AR World</title>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: sans-serif;
+    }
+
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      z-index: 100;
+      background: rgba(0,0,0,0.6);
+      padding: 12px;
+      border-radius: 8px;
+    }
+
+    #status {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: #00ff88;
+      z-index: 100;
+      font-size: 12px;
+    }
+
+    .legend {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #ddd;
+    }
+
+    .legend .item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+    }
+
+    .legend .marker {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .legend .axis-x { background: #ff0000; }
+    .legend .axis-y { background: #00ff00; }
+    .legend .axis-z { background: #0000ff; }
+    .legend .plane { background: rgba(0, 136, 255, 0.75); }
+    .legend .pose { background: #ff6600; }
+
+    input, button {
+      margin: 4px 0;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="ui">
+  Room:
+  <input id="room" value="default" style="width:140px">
+
+  <br/>
+
+  <button onclick="joinRoom()">Join Room</button>
+  <button onclick="startAR()">Enter AR</button>
+
+  <div class="legend">
+    <div class="item"><span class="marker pose"></span>Device pose</div>
+    <div class="item"><span class="marker axis-x"></span>X axis</div>
+    <div class="item"><span class="marker axis-y"></span>Y axis</div>
+    <div class="item"><span class="marker axis-z"></span>Z axis</div>
+    <div class="item"><span class="marker plane"></span>Vertical plane</div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script>
+  // =========================
+  // CORE STATE
+  // =========================
+
+  let scene, camera, renderer;
+  let worldRoot = null;
+  let ws = null;
+
+  let currentRoom = "default";
+  const paths = new Map();
+  const poseMarkers = new Map();
+  const planeMarkers = new Map();
+
+  const MAX_POINTS = 2000;
+
+  // =========================
+  // LOGGING
+  // =========================
+
+  function log(msg) {
+    document.getElementById('status').textContent = msg;
+    console.log(msg);
+  }
+
+  // =========================
+  // INIT THREE.JS WORLD
+  // =========================
+
+  async function init() {
+    scene = new THREE.Scene();
+
+    worldRoot = new THREE.Group();
+    scene.add(worldRoot);
+
+    camera = new THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      0.01,
+      200
+    );
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 1));
+    scene.add(new THREE.HemisphereLight(0xbbbbff, 0x444422, 0.8));
+
+    // Ground grid
+    const grid = new THREE.GridHelper(100, 50, 0x444444, 0x222222);
+    scene.add(grid);
+
+    camera.position.set(0, 8, 15);
+    camera.lookAt(0, 0, 0);
+
+    // Resize handling
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Render loop
+    renderer.setAnimationLoop(() => {
+      renderer.render(scene, camera);
+    });
+
+    log("Scene ready → Join a room or enter AR");
+  }
+
+  // =========================
+  // ROOM / WEBSOCKET
+  // =========================
+
+  function joinRoom() {
+    currentRoom = document.getElementById('room').value || 'default';
+
+    if (ws) ws.close();
+
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const host = window.location.host;
+
+    ws = new WebSocket(
+      `${protocol}://${host}/?room=${currentRoom}&user=web_${Math.random().toString(36).slice(2)}`
+    );
+
+    ws.onopen = () => {
+      log(`Connected → Room: ${currentRoom}`);
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        console.log(`📥 [${msg.type || 'unknown'}]`, msg);
+
+        if (msg.type === 'sync_state') {
+          handleSyncState(msg);
+          return;
+        }
+
+        if (msg.type === 'anchor' && msg.anchor) {
+          if (worldRoot) {
+            worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
+          }
+        }
+
+        if (msg.type === 'path_point') handlePathPoint(msg);
+        if (msg.type === 'pose') handlePose(msg);
+        if (msg.type === 'ar_vertical_plane') handleVerticalPlane(msg);
+        if (msg.type === 'reset_world') resetWorld();
+      } catch (err) {
+        console.warn('Bad message', err, e.data);
+      }
+    };
+
+    ws.onerror = (event) => {
+      console.warn('WebSocket connection error', event);
+      log('WebSocket connection failed');
+    };
+
+    ws.onclose = () => {
+      log('WebSocket disconnected');
+    };
+  }
+
+  function handleSyncState(state) {
+    if (state.anchor) {
+      worldRoot.position.set(state.anchor.x || 0, state.anchor.y || 0, state.anchor.z || 0);
+    }
+
+    if (state.paths) {
+      for (const user in state.paths) {
+        state.paths[user].forEach(pt => {
+          handlePathPoint({ user, x: pt.x, y: pt.y, z: pt.z });
+        });
+      }
+    }
+
+    if (state.planes) {
+      for (const id in state.planes) {
+        handleVerticalPlane(state.planes[id]);
+      }
+    }
+
+    log(`Synced state (v${state.version || 0})`);
+  }
+
+  function resetWorld() {
+    log("World Reset");
+    // Clear Paths
+    paths.forEach(p => worldRoot.remove(p.mesh));
+    paths.clear();
+
+    // Clear Poses
+    poseMarkers.forEach(m => worldRoot.remove(m));
+    poseMarkers.clear();
+
+    // Clear Planes
+    planeMarkers.forEach(p => worldRoot.remove(p));
+    planeMarkers.clear();
+  }
+
+  // =========================
+  // PATH HANDLING (GPU SAFE)
+  // =========================
+
+  function handlePathPoint(msg) {
+    let line = paths.get(msg.user);
+
+    // Create new user path if needed
+    if (!line) {
+      const geometry = new THREE.BufferGeometry();
+
+      const positions = new Float32Array(MAX_POINTS * 3);
+
+      geometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(positions, 3)
+      );
+
+      const material = new THREE.LineBasicMaterial({
+        color: 0x00ff88
+      });
+
+      const mesh = new THREE.Line(geometry, material);
+
+      line = {
+        mesh,
+        index: 0
+      };
+
+      worldRoot.add(mesh);
+      paths.set(msg.user, line);
+    }
+
+    const obj = line;
+    const array = obj.mesh.geometry.attributes.position.array;
+
+    const i = obj.index * 3;
+
+    const p = msg.point || { x: msg.x || 0, y: msg.y || 0, z: msg.z || 0 };
+
+    // Write point into buffer
+    array[i] = p.x;
+    array[i + 1] = p.y;
+    array[i + 2] = p.z;
+
+    obj.index = (obj.index + 1) % MAX_POINTS;
+
+    obj.mesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+  function handlePose(msg) {
+    if (!msg.state || !msg.state.pos) return;
+
+    const user = msg.user || msg.node || 'device_ar';
+    let marker = poseMarkers.get(user);
+
+    if (!marker) {
+      marker = new THREE.Group();
+
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0xff6600 })
+      );
+      sphere.position.set(0, 0, 0);
+      marker.add(sphere);
+
+      const axisLength = 0.5;
+      const createAxis = (color, dir) => {
+        const material = new THREE.LineBasicMaterial({ color });
+        const geometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(dir.x * axisLength, dir.y * axisLength, dir.z * axisLength),
+        ]);
+        return new THREE.Line(geometry, material);
+      };
+
+      marker.add(createAxis(0xff0000, { x: 1, y: 0, z: 0 }));
+      marker.add(createAxis(0x00ff00, { x: 0, y: 1, z: 0 }));
+      marker.add(createAxis(0x0000ff, { x: 0, y: 0, z: 1 }));
+
+      worldRoot.add(marker);
+      poseMarkers.set(user, marker);
+    }
+
+    marker.position.set(
+      msg.state.pos.x || 0,
+      msg.state.pos.y || 0,
+      msg.state.pos.z || 0
+    );
+
+    if (msg.state.rot) {
+      marker.quaternion.set(
+        msg.state.rot.x || 0,
+        msg.state.rot.y || 0,
+        msg.state.rot.z || 0,
+        msg.state.rot.w != null ? msg.state.rot.w : 1
+      );
+    }
+  }
+
+  function handleVerticalPlane(msg) {
+    if (!msg.pos || typeof msg.height !== 'number') return;
+
+    const id = msg.user || `${msg.type}_${msg.timestamp || Date.now()}`;
+    let plane = planeMarkers.get(id);
+
+    if (!plane) {
+      const geometry = new THREE.PlaneGeometry(1, 1);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0x0088ff,
+        transparent: true,
+        opacity: Math.min(Math.max(msg.alpha ?? 0.25, 0.1), 0.85),
+        side: THREE.DoubleSide,
+      });
+      plane = new THREE.Mesh(geometry, material);
+      plane.rotation.x = Math.PI / 2;
+      worldRoot.add(plane);
+      planeMarkers.set(id, plane);
+    }
+
+    plane.position.set(msg.pos.x || 0, (msg.height / 2) || 0.5, msg.pos.z || 0);
+    plane.scale.set(1, msg.height || 1, 1);
+  }
+
+  // =========================
+  // AR STARTUP
+  // =========================
+
+  async function startAR() {
+    if (!navigator.xr) {
+      log("WebXR not supported");
+      return;
+    }
+
+    try {
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: [],
+        optionalFeatures: ["local-floor", "hit-test"]
+      });
+
+      renderer.xr.setSession(session);
+      log("AR session active");
+    } catch (err) {
+      log("AR failed: " + err.message);
+      console.error(err);
+    }
+  }
+
+  // =========================
+  // BOOT
+  // =========================
+
+  window.onload = init;
+</script>
+
+</body>
+</html>

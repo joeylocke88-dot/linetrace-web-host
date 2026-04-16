@@ -1,0 +1,34 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) buffer MortonCodes {
+    uint codes[];
+};
+
+layout(std430, binding = 1) buffer GridCells {
+    uint cellStartEnd[]; // [cellIdx * 2] = start, [cellIdx * 2 + 1] = end
+};
+
+uniform uint uCount;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uCount) return;
+
+    uint currentCode = codes[id];
+
+    // Boundary detection for grid cells
+    if (id == 0u) {
+        cellStartEnd[currentCode * 2u] = 0u;
+    } else {
+        uint prevCode = codes[id - 1u];
+        if (currentCode != prevCode) {
+            cellStartEnd[prevCode * 2u + 1u] = id; // End of previous
+            cellStartEnd[currentCode * 2u] = id;    // Start of current
+        }
+    }
+
+    if (id == uint(uCount) - 1u) {
+        cellStartEnd[currentCode * 2u + 1u] = uint(uCount);
+    }
+}

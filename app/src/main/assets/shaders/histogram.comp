@@ -1,0 +1,25 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly buffer KeyBuf {
+    uvec2 keys[];
+};
+
+layout(std430, binding = 1) coherent buffer Histogram {
+    uint bins[];
+};
+
+uniform uint numBins;
+uniform uint uCount;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uCount) return;
+
+    uint key = keys[id].x;
+    if (key == 0xFFFFFFFFu) return;
+
+    uint bin = key % numBins;
+
+    atomicAdd(bins[bin], 1u);
+}

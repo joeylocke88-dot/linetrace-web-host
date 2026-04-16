@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+
+    <!-- Tactical Neon Palette (From Splash) -->
+    <color name="neon_cyan">#00E5FF</color>
+    <color name="tactical_cyan">#00E5FF</color>
+    <color name="neon_cyan_glow">#4D00E5FF</color> <!-- 30% alpha -->
+    <color name="deep_navy">#050F19</color>
+    <color name="tactical_bg">#050F19</color>
+    <color name="tactical_overlay">#CC050F19</color> <!-- 80% Navy -->
+
+    <color name="tactical_red">#FF1744</color>
+    <color name="tactical_green">#00E676</color>
+    <color name="tactical_yellow">#FFEA00</color>
+
+    <color name="button_border">#33FFFFFF</color>
+</resources>

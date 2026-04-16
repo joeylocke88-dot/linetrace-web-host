@@ -1,0 +1,50 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+// Flowstate V12 "Mirror Shield": Multi-Pass GPU Radix Sort (Spatial Indexing)
+// Processes 4 bits per pass. Full 30-bit Morton key sort in 8 passes.
+
+layout(std430, binding = 0) buffer InKeys { uint inKeys[]; };
+layout(std430, binding = 1) buffer InIndices { uint inIndices[]; };
+layout(std430, binding = 2) buffer OutKeys { uint outKeys[]; };
+layout(std430, binding = 3) buffer OutIndices { uint outIndices[]; };
+
+// Global offsets for the 16 bins (4 bits)
+layout(std430, binding = 4) buffer Offsets { uint globalOffsets[16]; };
+
+uniform uint uBitOffset;
+uniform uint uCount;
+uniform uint uPass; // 0: Histogram, 1: Scatter
+
+shared uint localCounters[16];
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+
+    if (uPass == 0u) { // Histogram Pass
+        if (gl_LocalInvocationIndex < 16u) localCounters[gl_LocalInvocationIndex] = 0u;
+        barrier();
+
+        if (gid < uCount) {
+            uint val = (inKeys[gid] >> uBitOffset) & 0xFu;
+            atomicAdd(localCounters[val], 1u);
+        }
+
+        barrier();
+        if (gl_LocalInvocationIndex < 16u) {
+            atomicAdd(globalOffsets[gl_LocalInvocationIndex], localCounters[gl_LocalInvocationIndex]);
+        }
+    } else { // Scatter Pass
+        if (gid >= uCount) return;
+
+        uint key = inKeys[gid];
+        uint idx = inIndices[gid];
+        uint val = (key >> uBitOffset) & 0xFu;
+
+        // Uses prefix-summed offsets from binding 4
+        uint targetIdx = atomicAdd(globalOffsets[val], 1u);
+
+        outKeys[targetIdx] = key;
+        outIndices[targetIdx] = idx;
+    }
+}

@@ -1,0 +1,31 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+struct Surfel {
+    vec4 pos;     // xyz, radius
+    vec4 normal;  // xyz, confidence
+    vec4 color;
+    vec4 extra;   // id, timestamp
+};
+
+layout(std430, binding = 0) readonly buffer InIndices {
+    uint indices[];
+};
+
+layout(std430, binding = 1) readonly buffer InSurfels {
+    Surfel surfels[];
+};
+
+layout(std430, binding = 2) writeonly buffer OutSurfels {
+    Surfel sorted[];
+};
+
+uniform uint uCount;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uCount) return;
+
+    uint originalIdx = indices[id];
+    sorted[id] = surfels[originalIdx];
+}

@@ -1,0 +1,49 @@
+#version 310 es
+layout(local_size_x = 64) in;
+
+struct Factor {
+    int a;
+    int b;
+    int padding1;
+    int padding2;
+    mat4 measurement;
+    float weight;
+    float p1, p2, p3;
+};
+
+layout(std430, binding = 0) buffer Factors {
+    Factor factors[];
+};
+
+layout(std430, binding = 1) buffer Poses {
+    mat4 poses[];
+};
+
+layout(std430, binding = 2) buffer Deltas {
+    vec4 deltaTwist[]; // xyz is translation delta, w is rotation delta (simplified)
+};
+
+uniform int uFactorCount;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uint(uFactorCount)) return;
+
+    Factor f = factors[id];
+
+    mat4 Ta = poses[f.a];
+    mat4 Tb = poses[f.b];
+
+    // SE(3) Residual: err = inv(M) * inv(Ta) * Tb
+    mat4 err = inverse(f.measurement) * inverse(Ta) * Tb;
+
+    // Translation residual
+    vec3 t = vec3(err[3][0], err[3][1], err[3][2]);
+
+    // Simple gradient descent update on twist
+    // atomicAdd is not available for floats in 310 es without extensions
+    // For this tactical implementation, we'll assume a single-factor-per-node update
+    // or use a structured pass in the next version.
+    // For now, let's just apply it to f.a to show the mechanism
+    deltaTwist[f.a] += vec4(-t * f.weight * 0.1, 0.0);
+}

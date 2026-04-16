@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:src="@drawable/linetrace_splash" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:background="#66000000">
+
+        <ImageView
+            android:id="@+id/logo"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:src="@drawable/fg_logo"
+            android:visibility="gone"
+            android:scaleType="centerInside"
+            android:contentDescription="FilmGeist Excelsior Logo" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:text="LINETRACE AR"
+            android:textColor="@color/white"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:letterSpacing="0.15"
+            android:fontFamily="sans-serif-thin" />
+
+        <View
+            android:layout_width="40dp"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:background="#44FFFFFF" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="FILMGEIST EXCELSIOR"
+            android:textColor="#AAFFFFFF"
+            android:textSize="10sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.4"
+            android:fontFamily="monospace" />
+
+        <EditText
+            android:id="@+id/editServerIp"
+            android:layout_width="200dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="48dp"
+            android:background="@android:color/transparent"
+            style="@style/TacticalLabel"
+            android:gravity="center"
+            android:hint="SERVER IP"
+            android:inputType="textNoSuggestions"
+            android:text="192.168.42.237"
+            android:textColor="@color/neon_cyan"
+            android:textColorHint="#4400E5FF"
+            android:textSize="14sp" />
+
+        <View
+            android:layout_width="120dp"
+            android:layout_height="1dp"
+            android:layout_marginTop="4dp"
+            android:background="@color/neon_cyan_glow" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/btnIpHome"
+                style="@style/TacticalLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:text="HOME" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="|"
+                android:textColor="#2200E5FF"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/btnIpLab"
+                style="@style/TacticalLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:text="LAB" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="|"
+                android:textColor="#2200E5FF"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/btnIpCloud"
+                style="@style/TacticalLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:text="CLOUD" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tapToStart"
+        style="@style/TacticalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="80dp"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:text="INITIALIZE SYSTEM" />
+
+</FrameLayout>

@@ -1,0 +1,76 @@
+#version 310 es
+layout(local_size_x = 128) in;
+
+struct Surfel {
+    vec4 posRadius;   // 0-15: xyz, radius
+    vec4 normalConf;  // 16-31: xyz, confidence
+    vec4 color;       // 32-47: rgb, unused
+    uvec2 id;         // 48-55: 64-bit ID (low, high)
+    uvec2 timestamp;  // 56-63: 64-bit Timestamp (low, high)
+};
+
+layout(std430, binding = 0) buffer InputPoints {
+    vec4 points[]; // xyz + confidence
+};
+
+layout(std430, binding = 1) buffer Surfels {
+    Surfel surfels[];
+};
+
+uniform mat4 uCameraPose;
+uniform int uPointCount;
+uniform int uMaxSurfels;
+uniform int uCurrentSurfelCount;
+uniform uvec2 uTimestamp;
+
+uvec2 generateSurfelId(vec3 p) {
+    // 21 bits per component for ~2cm precision over large range
+    ivec3 i = ivec3(p * 100.0);
+
+    // Low 32 bits: (yi << 21) | zi
+    uint low = (uint(uint(i.y) & 0x7FFu) << 21u) | (uint(uint(i.z)) & 0x1FFFFFu);
+    // High 32 bits: (xi << 10) | (yi >> 11)
+    uint high = (uint(uint(i.x) & 0x3FFFFFu) << 10u) | (uint(uint(i.y) >> 11u) & 0x3FFu);
+
+    return uvec2(low, high);
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uint(uPointCount)) return;
+
+    vec4 localP = points[id];
+    if (localP.w < 0.1) return; // Low confidence filter
+
+    // Transform to world space
+    vec4 worldP = uCameraPose * vec4(localP.xyz, 1.0);
+
+    // Atomic append would be better, but for now we use the frame offset
+    uint writeIdx = uint(uCurrentSurfelCount) + id;
+    if (writeIdx >= uint(uMaxSurfels)) return;
+
+    Surfel s;
+    s.posRadius = vec4(worldP.xyz, 0.02); // 2cm radius
+
+    // --- ADVANCED NORMAL ESTIMATION ---
+    // Instead of just viewDir, we try to detect if we're on a vertical surface.
+    // ARCore point clouds don't provide normals, but we can infer from motion.
+    vec3 camPos = uCameraPose[3].xyz;
+    vec3 viewDir = normalize(camPos - worldP.xyz);
+
+    // We assume horizontal motion for the most part.
+    // If the point is "in front" of us and we are moving, the normal should be roughly -viewDir.
+    // However, to trigger the 'wall' logic in the shader (1.0 - abs(normal.y)),
+    // we need normal.y to be close to 0 for vertical walls.
+
+    vec3 estimatedNormal = viewDir;
+    estimatedNormal.y *= 0.1; // Flatten the normal to force it into the horizontal plane
+    estimatedNormal = normalize(estimatedNormal);
+
+    s.normalConf = vec4(estimatedNormal, localP.w);
+    s.color = vec4(1.0, 1.0, 1.0, 1.0);
+    s.id = generateSurfelId(worldP.xyz);
+    s.timestamp = uTimestamp;
+
+    surfels[writeIdx] = s;
+}

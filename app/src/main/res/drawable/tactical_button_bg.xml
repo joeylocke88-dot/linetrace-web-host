@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Pressed State: Neon Cyan Solid with White Border -->
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/neon_cyan" />
+            <stroke android:width="1dp" android:color="@color/white" />
+            <corners android:radius="2dp" />
+        </shape>
+    </item>
+
+    <!-- Checked/Active State: Transparent with thick Neon Cyan Border -->
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/neon_cyan_glow" />
+            <stroke android:width="2dp" android:color="@color/neon_cyan" />
+            <corners android:radius="2dp" />
+        </shape>
+    </item>
+
+    <!-- Default State: Deep Navy with thin Neon Cyan Border -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/deep_navy" />
+            <stroke android:width="1dp" android:color="@color/neon_cyan" />
+            <corners android:radius="2dp" />
+        </shape>
+    </item>
+</selector>

@@ -1,0 +1,39 @@
+#version 310 es
+layout(local_size_x = 64) in;
+
+struct Factor {
+    int from;
+    int to;
+    mat4 measurement;
+};
+
+layout(std430, binding = 0) buffer Factors {
+    Factor factors[];
+};
+
+layout(std430, binding = 1) buffer Poses {
+    mat4 poses[];
+};
+
+layout(std430, binding = 2) buffer Residuals {
+    vec4 residuals[];
+};
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uint(factors.length())) return;
+
+    Factor f = factors[id];
+
+    mat4 Ti = poses[f.from];
+    mat4 Tj = poses[f.to];
+
+    // r = Tij^-1 * (Ti^-1 * Tj)
+    mat4 Tij_est = inverse(Ti) * Tj;
+    mat4 error = inverse(f.measurement) * Tij_est;
+
+    // convert matrix error -> vector residual (simplified)
+    vec3 r = vec3(error[3][0], error[3][1], error[3][2]);
+
+    residuals[id] = vec4(r, 1.0);
+}

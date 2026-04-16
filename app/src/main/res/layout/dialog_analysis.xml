@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="24dp"
+    android:background="#1A1A1A">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="TRACE ANALYSIS"
+            android:textColor="#00FFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:layout_marginBottom="24dp" />
+
+        <TableLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stretchColumns="1">
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Distance:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvDistance" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Duration:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvDuration" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Avg Speed:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvAvgSpeed" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Max Speed:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvMaxSpeed" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Vertical:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvVertical" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Gain / Loss:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvGainLoss" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Curvature:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvCurvature" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Stability:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvStability" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Smoothness:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvSmoothness" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Jitters:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvJitters" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="POI Count:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvPoiCount" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:layout_marginBottom="8dp">
+                <TextView android:text="Segments:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvSegments" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:id="@+id/rowLoop" android:layout_marginBottom="8dp" android:visibility="gone">
+                <TextView android:text="Loop Error:" android:textColor="#88FF88" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvLoopError" android:textColor="#00FF00" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:id="@+id/rowArea" android:layout_marginBottom="8dp" android:visibility="gone">
+                <TextView android:text="Area (Est):" android:textColor="#88FF88" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvArea" android:textColor="#00FF00" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:id="@+id/rowBBox" android:layout_marginBottom="8dp" android:visibility="gone">
+                <TextView android:text="BBox Area:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvBBoxArea" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:id="@+id/rowScanDim" android:layout_marginBottom="8dp" android:visibility="gone">
+                <TextView android:text="Scan Dim:" android:textColor="#88FFFFFF" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvScanDim" android:textColor="#FFFFFF" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:id="@+id/rowIntegrity" android:layout_marginBottom="8dp">
+                <TextView android:text="Integrity:" android:textColor="#FF5555" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvIntegrity" android:textColor="#FF0000" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+
+            <TableRow android:id="@+id/rowAnomalies" android:layout_marginBottom="8dp" android:visibility="gone">
+                <TextView android:text="Anomalies:" android:textColor="#FF5555" android:fontFamily="monospace" />
+                <TextView android:id="@+id/tvAnomalies" android:textColor="#FF0000" android:fontFamily="monospace" android:gravity="end" />
+            </TableRow>
+        </TableLayout>
+
+        <TextView
+            android:id="@+id/tvScanBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="16dp"
+            android:text="ENVIRONMENT SCAN DETECTED"
+            android:textColor="#00FF00"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnAnalysisClose"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="DISMISS"
+            android:layout_marginTop="24dp"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:textColor="#00FFFF" />
+
+    </LinearLayout>
+</ScrollView>

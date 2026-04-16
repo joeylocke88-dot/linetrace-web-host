@@ -1,0 +1,20 @@
+#version 310 es
+layout(local_size_x = 32) in;
+
+layout(std430, binding = 0) buffer Residuals {
+    vec4 residuals[];
+};
+
+layout(std430, binding = 1) buffer Twists {
+    vec4 twists[];
+};
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uint(residuals.length())) return;
+
+    vec3 r = residuals[id].xyz;
+
+    // Simple damped correction in Lie algebra space
+    twists[id] = vec4(-r * 0.5, 1.0);
+}

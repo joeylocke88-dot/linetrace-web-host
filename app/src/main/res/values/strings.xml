@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LineTrace AR</string>
+    <string name="btn_rec">WRITE TRACE</string>
+    <string name="btn_stop">STOP</string>
+    <string name="btn_ghost">GHOST</string>
+    <string name="btn_lock">LOCK</string>
+    <string name="btn_sync">PLANE SYNC</string>
+    <string name="btn_lazarus">REALITY ALIGNMENT</string>
+    <string name="btn_reset">RESET</string>
+    <string name="btn_close_app">EXIT</string>
+    <string name="btn_analyze_history">DATA</string>
+    <string name="btn_config">CONFIG</string>
+    <string name="btn_apply_close">APPLY &amp; CLOSE</string>
+    <string name="btn_start">START</string>
+    <string name="btn_finish">FINISH</string>
+    <string name="btn_resume">RESUME</string>
+    <string name="segments_format">%d S / %d C</string>
+    <string name="anomalies_detected">%d DETECTED</string>
+    <string name="msg_stall">Lazarus: Renderer Stall Detected - Re-aligning...</string>
+    <string name="msg_alignment_blocked">Alignment Blocked: Reality Unstable (%1$.1f°C)</string>
+    <string name="msg_alignment_init">REALITY ALIGNMENT INITIATED...</string>
+    <string name="msg_resurrection_try">Lazarus: Attempting Resurrection...</string>
+    <string name="msg_warm_success">Warm Resurrection Successful</string>
+    <string name="msg_cold_success">Cold Resurrection Successful</string>
+    <string name="msg_lazarus_fail">Lazarus Failed: %s</string>
+    <string name="msg_session_reset">Session Reset</string>
+    <string name="msg_session_saved">Session Saved</string>
+    <string name="msg_poi_placed">POI Placed</string>
+    <string name="msg_tap_to_start">Tap a surface to begin tracing</string>
+    <string name="msg_tracing_active">Tracing Active. Tap surfaces for POIs.</string>
+    <string name="msg_tracing_complete">Tracing Complete. Save or Reset.</string>
+    <string name="msg_plane_sync">Initiating PLANE SYNC...</string>
+    <string name="msg_ghost_loaded">Loaded: %s</string>
+    <string name="msg_migrated">Migrated %d sessions</string>
+    <string name="msg_hypervisor_on">Hypervisor Superuser: ONLINE</string>
+    <string name="msg_hypervisor_off">Hypervisor Superuser: OFFLINE</string>
+    <string name="msg_camera_in_use">Camera in use by another app. Please close PiP windows.</string>
+</resources>

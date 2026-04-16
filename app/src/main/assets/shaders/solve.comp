@@ -1,0 +1,58 @@
+#version 310 es
+layout(local_size_x = 32) in;
+
+layout(std430, binding = 0) buffer Poses {
+    mat4 poses[];
+};
+
+layout(std430, binding = 1) buffer Twists {
+    vec4 twists[];
+};
+
+// Lie Group SE(3) Exponential Map (Small-Angle Approximation)
+mat4 expSE3(vec3 w, vec3 v) {
+    mat4 m = mat4(1.0);
+
+    // Translation component
+    m[3].xyz = v;
+
+    // Rotation component (I + [w]x)
+    m[0].y = w.z;
+    m[0].z = -w.y;
+    m[1].x = -w.z;
+    m[1].z = w.x;
+    m[2].x = w.y;
+    m[2].y = -w.x;
+
+    return m;
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= uint(poses.length())) return;
+
+    // Use twist for the specific node (mapping factor residuals to node updates)
+    // In a simplified solver, we use the global or local twist delta.
+    vec4 twist = twists[0]; // Using global correction for this tactical layer
+
+    // STABILITY RULE: Keep step size small (Damping 0.2)
+    vec3 w = twist.xyz * 0.1; // Rotational damping
+    vec3 v = twist.xyz * 0.2; // Translational damping
+
+    mat4 T = poses[id];
+    mat4 dT = expSE3(w, v);
+
+    // SE(3) Update: T_new = dT * T (Group multiplication, NOT linear accumulation)
+    mat4 T_new = dT * T;
+
+    // STABILITY RULE: Normalize/Re-orthogonalize every frame (Gram-Schmidt)
+    vec3 x = normalize(T_new[0].xyz);
+    vec3 y = normalize(T_new[1].xyz - dot(x, T_new[1].xyz) * x);
+    vec3 z = cross(x, y);
+
+    T_new[0].xyz = x;
+    T_new[1].xyz = y;
+    T_new[2].xyz = z;
+
+    poses[id] = T_new;
+}
