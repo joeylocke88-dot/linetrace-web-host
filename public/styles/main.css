@@ -1,0 +1,144 @@
+/* /styles/main.css */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #05070a;
+  font-family: monospace;
+}
+
+/* =========================
+   WEBGL CANVAS LAYER
+   ========================= */
+canvas {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1; /* FIX: ensure above grid */
+}
+
+/* =========================
+   SUBTLE GRID BACKGROUND
+   ========================= */
+body:
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    linear-gradient(rgba(0, 255, 204, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 204, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+
+  /* FIX: subtle motion for "live field" feel */
+  animation: gridDrift 25s linear infinite;
+}
+
+/* GRID ANIMATION */
+@keyframes gridDrift {
+  0% {
+    transform: translate(0, 0);
+  }
+  100% {
+    transform: translate(40px, 40px);
+  }
+}
+
+/* =========================
+   OPTIONAL OVERLAY LAYER
+   ========================= */
+#overlay, .overlay {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* =========================
+   GLOW TEXT STYLE
+   ========================= */
+.glow {
+  color: #00ffcc;
+  text-shadow: 0 0 8px rgba(0, 255, 204, 0.6);
+}
+
+/* =========================
+   HUD / DEBUG PANEL
+   ========================= */
+.hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 10px;
+
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(0, 255, 204, 0.25);
+  border-radius: 6px;
+
+  color: #00ffcc;
+  font-size: 12px;
+
+  pointer-events: none;
+
+  /* subtle pulse for "live system" feel */
+  animation: hudPulse 3s ease-in-out infinite;
+}
+
+/* HUD PULSE */
+@keyframes hudPulse {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(0, 255, 204, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(0, 255, 204, 0.4);
+  }
+}
+
+/* =========================
+   WARNING STATE
+   ========================= */
+.warning {
+  border-color: rgba(255, 50, 50, 0.8) !important;
+  color: #ff4d4d;
+
+  animation: warningFlash 0.8s infinite;
+}
+
+@keyframes warningFlash {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* =========================
+   STATUS INDICATOR
+   ========================= */
+.status {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+
+  font-size: 11px;
+  color: rgba(0, 255, 204, 0.6);
+
+  pointer-events: none;
+}
+
+/* =========================
+   PERFORMANCE HINTS
+   ========================= */
+canvas,
+body::before {
+  will-change: transform;
+}
