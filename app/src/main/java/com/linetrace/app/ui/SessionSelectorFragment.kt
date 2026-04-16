@@ -9,9 +9,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.linetrace.app.ImuNetworkBridge
 import com.linetrace.app.R
 import java.io.File
 import java.text.SimpleDateFormat
@@ -20,6 +22,7 @@ import java.util.Locale
 
 class SessionSelectorFragment(
     private val sessions: List<File>,
+    private val networkBridge: ImuNetworkBridge? = null,
     private val onSessionSelected: (File) -> Unit
 ) : BottomSheetDialogFragment() {
 
@@ -38,8 +41,10 @@ class SessionSelectorFragment(
         }
 
         val title = TextView(requireContext()).apply {
-            text = "> MISSION LOGS_V2.0"
-            setTextColor(context.getColor(R.color.tactical_cyan))
+            val status = if (networkBridge?.isConnected == true) " [ONLINE]" else " [OFFLINE]"
+            text = "> MISSION LOGS_V2.0$status"
+            setTextColor(if (networkBridge?.isConnected == true) 
+                context.getColor(R.color.tactical_cyan) else Color.RED)
             textSize = 16f
             setPadding(64, 64, 64, 16)
             typeface = android.graphics.Typeface.MONOSPACE

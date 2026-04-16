@@ -5,6 +5,7 @@
   <title>LineTrace • Shared AR World</title>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
 
   <style>
     body {
@@ -162,6 +163,12 @@
     renderer.xr.enabled = true;
     document.body.appendChild(renderer.domElement);
 
+    // Controls
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.screenSpacePanning = true;
+
     // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 1));
     scene.add(new THREE.HemisphereLight(0xbbbbff, 0x444422, 0.8));
@@ -303,76 +310,87 @@
   }
 
   // =========================
-  // SURFEL RENDERING (Dense Map)
+  // SURFEL RENDERING (Flowstate V12 Protocol)
   // =========================
   let surfelPoints = null;
-  const MAX_SURFELS = 100000;
+  const MAX_SURFELS = 500000;
 
   function handleWorldDelta(msg) {
     if (!msg.surfelData) return;
 
-    // Decode Base64
-    let binary;
     try {
-      binary = atob(msg.surfelData);
+      // Decode Base64 efficiently
+      const binaryString = window.atob(msg.surfelData);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      const dataView = new DataView(bytes.buffer);
+      const count = Math.floor(len / 64);
+
+      if (!surfelPoints) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
+
+        const material = new THREE.PointsMaterial({
+          size: 0.05,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.8,
+          sizeAttenuation: true
+        });
+        surfelPoints = new THREE.Points(geometry, material);
+        worldRoot.add(surfelPoints);
+        surfelPoints.userData.index = 0;
+      }
+
+      const posAttr = surfelPoints.geometry.attributes.position;
+      const colAttr = surfelPoints.geometry.attributes.color;
+      let idx = surfelPoints.userData.index;
+
+      stats.deltas++;
+      document.getElementById('stat-deltas').textContent = stats.deltas;
+
+      for (let i = 0; i < count; i++) {
+        const offset = i * 64;
+
+        // Protocol V12: px(0), py(4), pz(8), nx(16), ny(20), nz(24), r(32), g(36), b(40)
+        // Values are already negated by Android app for centering
+        const px = dataView.getFloat32(offset, true);
+        const py = dataView.getFloat32(offset + 4, true);
+        const pz = dataView.getFloat32(offset + 8, true);
+
+        const r = dataView.getFloat32(offset + 32, true);
+        const g = dataView.getFloat32(offset + 36, true);
+        const b = dataView.getFloat32(offset + 40, true);
+
+        const writeIdx = idx * 3;
+        posAttr.array[writeIdx] = px;
+        posAttr.array[writeIdx + 1] = py;
+        posAttr.array[writeIdx + 2] = pz;
+
+        colAttr.array[writeIdx] = r;
+        colAttr.array[writeIdx + 1] = g;
+        colAttr.array[writeIdx + 2] = b;
+
+        idx = (idx + 1) % MAX_SURFELS;
+        if (stats.surfels < MAX_SURFELS) stats.surfels++;
+      }
+
+      document.getElementById('stat-surfels').textContent = stats.surfels;
+      surfelPoints.userData.index = idx;
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+
+      // Update draw range
+      surfelPoints.geometry.setDrawRange(0, Math.min(stats.surfels, MAX_SURFELS));
+
     } catch (e) {
-      console.error("Base64 decode failed", e);
-      return;
+      console.error("Surfel Decode Error:", e);
     }
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-    const dataView = new DataView(bytes.buffer);
-    if (bytes.length % 64 !== 0) {
-      console.warn(`Malformed surfel data: length ${bytes.length} is not a multiple of 64`);
-    }
-    const count = Math.floor(bytes.length / 64);
-
-    if (!surfelPoints) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
-      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
-
-      const material = new THREE.PointsMaterial({ size: 0.02, vertexColors: true });
-      surfelPoints = new THREE.Points(geometry, material);
-      worldRoot.add(surfelPoints);
-      surfelPoints.userData.index = 0;
-    }
-
-    const posAttr = surfelPoints.geometry.attributes.position;
-    const colAttr = surfelPoints.geometry.attributes.color;
-    let idx = surfelPoints.userData.index;
-
-    stats.deltas++;
-    document.getElementById('stat-deltas').textContent = stats.deltas;
-
-    for (let i = 0; i < count; i++) {
-      const offset = i * 64;
-      // Surfel structure (64 bytes): px, py, pz, radius, nx, ny, nz, conf, r, g, b, ...
-      const px = dataView.getFloat32(offset, true);
-      const py = dataView.getFloat32(offset + 4, true);
-      const pz = dataView.getFloat32(offset + 8, true);
-      const r = dataView.getFloat32(offset + 32, true);
-      const g = dataView.getFloat32(offset + 36, true);
-      const b = dataView.getFloat32(offset + 40, true);
-
-      const writeIdx = idx * 3;
-      posAttr.array[writeIdx] = px;
-      posAttr.array[writeIdx + 1] = py;
-      posAttr.array[writeIdx + 2] = pz;
-
-      colAttr.array[writeIdx] = r;
-      colAttr.array[writeIdx + 1] = g;
-      colAttr.array[writeIdx + 2] = b;
-
-      idx = (idx + 1) % MAX_SURFELS;
-      if (stats.surfels < MAX_SURFELS) stats.surfels++;
-    }
-
-    document.getElementById('stat-surfels').textContent = stats.surfels;
-    surfelPoints.userData.index = idx;
-    posAttr.needsUpdate = true;
-    colAttr.needsUpdate = true;
   }
 
   // =========================

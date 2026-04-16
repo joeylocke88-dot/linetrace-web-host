@@ -253,10 +253,12 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         recorder = SessionRecorder(getExternalFilesDir("sessions"))
         arController = ArCoreController(this)
 
-        val serverUrl = if (targetIp.startsWith("ws://") || targetIp.startsWith("wss://")) {
-            targetIp
-        } else {
-            "ws://$targetIp:10000/"
+        val serverUrl = when {
+            targetIp.startsWith("ws://") || targetIp.startsWith("wss://") -> targetIp
+            targetIp.startsWith("https://") -> targetIp.replace("https://", "wss://")
+            targetIp.startsWith("http://") -> targetIp.replace("http://", "ws://")
+            targetIp.contains("onrender.com") -> "wss://$targetIp"
+            else -> "ws://$targetIp:10000/"
         }
         imuBridge.updateServerUrl(serverUrl)
         
@@ -438,7 +440,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         findViewById<Button>(R.id.btnAnalyzeHistory).setOnClickListener {
             val sessions = recorder.listSessions().filter { it.name.endsWith(".json") }
             if (sessions.isNotEmpty()) {
-                SessionSelectorFragment(sessions) { file ->
+                SessionSelectorFragment(sessions, imuBridge) { file ->
                     uiHandler.post {
                         val points = recorder.loadSession(file)
                         showAnalysisDialog(points)
@@ -456,7 +458,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
                     if (migrated > 0) Toast.makeText(this, getString(R.string.msg_migrated, migrated), Toast.LENGTH_SHORT).show()
                     val sessions = recorder.listSessions().filter { it.name.endsWith(".json") }
                     if (sessions.isNotEmpty()) {
-                        SessionSelectorFragment(sessions) { file ->
+                        SessionSelectorFragment(sessions, imuBridge) { file ->
                             uiHandler.post {
                                 val points = recorder.loadSession(file)
                                 renderer.loadGhost(points)
