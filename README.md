@@ -19,10 +19,6 @@ Responders can mark "Safe/Clear" paths through post-disaster zones where landmar
 *   **Thermal Visibility:** Custom shaders ensure the path is visible through smoke or dust.
 *   **Drift Correction:** **Manual Anchor Re-sync** allows teams to "zero out" accumulated VIO drift against known physical landmarks.
 
-### 4. Autonomous "Shadow" Testing
-Tele-operators can compare a vehicle's "intended path" (Ghost) against its "actual path" (Live) in real-time.
-*   **Visual Feedback:** The **Engagement Lock v2** tether provides a color-coded visual indicator of Cross-Track Error (CTE).
-
 ---
 
 ## 🛠 Key Technology
@@ -31,7 +27,6 @@ Tele-operators can compare a vehicle's "intended path" (Ghost) against its "actu
 - **Lazarus Protocol:** A 100ms heartbeat monitor that ensures the GL/Native context "resurrects" instantly after a crash or stall.
 - **Tactical HUD:** Speed-adaptive line widths (14f to 28f) and perspective-aware depth bias to prevent Z-fighting.
 - **Thermal Management:** Proactive throttling that drops sensor sampling frequency if battery temperature exceeds 42°C.
-- **Async Staging:** Ghost path spline interpolation is offloaded to background threads to ensure 60fps UI performance.
 
 ---
 
@@ -44,10 +39,13 @@ The Android app streams a high-density surfel map (fused AR points + RGB) to the
 *   **Protocol:** Custom `world_delta` binary packets encoded in Base64 JSON.
 *   **Visualizer:** Built with Three.js for real-time 3D rendering in any browser.
 
-### 2. Multi-User Rooms
-Collaborators can join specific "Rooms" to see shared paths and environment scans.
-*   **Default Room:** `default` (used for standard sessions).
-*   **Web URL:** [https://linetrace-web.onrender.com](https://linetrace-web.onrender.com)
+### 2. Supported Messages (WebSocket)
+The host (`linetrace-web-host`) acts as a transparent relay for:
+- `type: "anchor"` / `"ar_anchor"` → Shared world origin synchronization.
+- `type: "world_delta"` → Dense surfel point cloud updates.
+- `type: "path_point"` → Real-time path tracing.
+- `type: "pose"` → Device position and orientation for 3D monitoring.
+- `type: "ar_vertical_plane"` → Visualization of detected geometry.
 
 ---
 
@@ -65,7 +63,7 @@ Collaborators can join specific "Rooms" to see shared paths and environment scan
 1.  Navigate to `linetrace-web-host/`.
 2.  Install dependencies: `npm install`.
 3.  Start server: `npm start`.
-4.  Access at `http://localhost:10000`.
+4.  Access at [https://linetrace-web.onrender.com](https://linetrace-web.onrender.com) or `http://localhost:10000`.
 
 ---
 

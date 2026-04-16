@@ -20,7 +20,13 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Server State
+world_state.json
+
 # OS Files
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# VS Code
+.vscode/

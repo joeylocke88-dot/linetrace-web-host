@@ -37,14 +37,23 @@ class SessionSelectorFragment(
         }
 
         val title = TextView(requireContext()).apply {
-            text = "MISSION LOGS"
+            text = "> MISSION LOGS_V2.0"
             setTextColor(context.getColor(R.color.tactical_cyan))
-            textSize = 18f
-            setPadding(64, 64, 64, 32)
+            textSize = 16f
+            setPadding(64, 64, 64, 16)
             typeface = android.graphics.Typeface.MONOSPACE
             paintFlags = paintFlags or android.graphics.Paint.FAKE_BOLD_TEXT_FLAG
         }
         root.addView(title)
+
+        // Tactical separator
+        root.addView(View(requireContext()).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2).apply {
+                setMargins(64, 0, 64, 16)
+            }
+            setBackgroundColor(context.getColor(R.color.tactical_cyan))
+            alpha = 0.3f
+        })
 
         val recyclerView = RecyclerView(requireContext()).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -81,11 +90,21 @@ class SessionSelectorFragment(
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val file = items[position]
-            holder.name.text = file.name
+            // Clean up name for tactical display
+            holder.name.text = file.nameWithoutExtension.uppercase()
+            
             val date = Date(file.lastModified())
             val size = file.length() / 1024
-            holder.details.text = "${dateFormat.format(date)} • ${size}KB"
-            holder.itemView.setOnClickListener { onClick(file) }
+            
+            // Format: [DATE] | [SIZE] | STATUS: OK
+            holder.details.text = "[${dateFormat.format(date).uppercase()}] | ${size}KB | SYNC: READY"
+            
+            holder.itemView.setOnClickListener { 
+                holder.itemView.alpha = 0.5f
+                onClick(file)
+                // Dismiss on main thread to avoid window leak/sync issues
+                Handler(Looper.getMainLooper()).post { dismiss() }
+            }
         }
 
         override fun getItemCount(): Int = items.size
