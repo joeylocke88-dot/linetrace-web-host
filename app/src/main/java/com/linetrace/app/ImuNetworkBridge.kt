@@ -131,10 +131,11 @@ class ImuNetworkBridge(
                                 val rotObj = state?.optJSONObject("rot")
                                 
                                 if (posObj != null) {
+                                    // Protocol Alignment: Negate received coordinates to convert back to local AR space
                                     val pos = floatArrayOf(
-                                        posObj.optDouble("x").toFloat(),
-                                        posObj.optDouble("y").toFloat(),
-                                        posObj.optDouble("z").toFloat()
+                                        -posObj.optDouble("x").toFloat(),
+                                        -posObj.optDouble("y").toFloat(),
+                                        -posObj.optDouble("z").toFloat()
                                     )
                                     val rot = if (rotObj != null) {
                                         floatArrayOf(
@@ -206,8 +207,11 @@ class ImuNetworkBridge(
         
         val remaining = delta.surfelData.remaining()
         if (remaining <= 0) return
+
+        // Protocol Integrity: Surfel packets MUST be exact multiples of 64 bytes
         if (remaining % 64 != 0) {
-            Log.w("ImuNetworkBridge", "Broadcasting malformed delta: $remaining bytes (not multiple of 64)")
+            Log.e("ImuNetworkBridge", "REJECTED: Malformed delta ($remaining bytes is not multiple of 64)")
+            return
         }
 
         val json = JSONObject()
@@ -247,6 +251,7 @@ class ImuNetworkBridge(
 
     /**
      * 🔥 Send CORE STATE (Enriched Cayley Graph Node)
+     * NEGATES anchor updates in rawData if present for Web Visualizer centering
      */
     fun sendCoreState(
         type: String,
@@ -274,32 +279,35 @@ class ImuNetworkBridge(
         }
 
         // 1. STATE (Pos, Vel, Rot)
+        // Protocol Alignment: Negate coordinates for Web Visualizer centering
         val stateObj = JSONObject()
-        pos?.let { stateObj.put("pos", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]) }) }
-        vel?.let { stateObj.put("vel", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]) }) }
-        rot?.let { stateObj.put("rot", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]) }) }
+        pos?.let { stateObj.put("pos", JSONObject().apply { put("x", -it[0]); put("y", -it[1]); put("z", -it[2]) }) }
+        vel?.let { stateObj.put("vel", JSONObject().apply { put("x", -it[0]); put("y", -it[1]); put("z", -it[2]) }) }
+        rot?.let { stateObj.put("rot", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]); put("w", it[3]) }) }
         json.put("state", stateObj)
 
         // 2. BASIS
+        // Negate basis vectors to maintain coordinate system consistency
         val basisObj = JSONObject()
-        basisObj.put("forward", JSONArray().apply { (forward ?: floatArrayOf(0f,0f,1f)).forEach { put(it) } })
-        basisObj.put("right", JSONArray().apply { (right ?: floatArrayOf(1f,0f,0f)).forEach { put(it) } })
-        basisObj.put("up", JSONArray().apply { (up ?: floatArrayOf(0f,1f,0f)).forEach { put(it) } })
+        basisObj.put("forward", JSONArray().apply { (forward ?: floatArrayOf(0f,0f,1f)).forEach { put(-it) } })
+        basisObj.put("right", JSONArray().apply { (right ?: floatArrayOf(1f,0f,0f)).forEach { put(-it) } })
+        basisObj.put("up", JSONArray().apply { (up ?: floatArrayOf(0f,1f,0f)).forEach { put(-it) } })
         json.put("basis", basisObj)
 
         // 3. EDGES (Cayley Temporal Continuity)
         val edgesArray = JSONArray()
         
         // Automatic Temporal Edge (Euclidean Delta)
+        // Deltas are negated (prev - pos) to match the negated world space
         if (type == "imu" && pos != null) {
             lastImuPos?.let { prev ->
                 val edgeObj = JSONObject()
                 edgeObj.put("to", "prev")
                 edgeObj.put("transform", "delta")
                 edgeObj.put("delta", JSONObject().apply {
-                    put("dx", pos[0] - prev[0])
-                    put("dy", pos[1] - prev[1])
-                    put("dz", pos[2] - prev[2])
+                    put("dx", prev[0] - pos[0])
+                    put("dy", prev[1] - pos[1])
+                    put("dz", prev[2] - pos[2])
                 })
                 edgesArray.put(edgeObj)
             }
@@ -310,9 +318,9 @@ class ImuNetworkBridge(
                 edgeObj.put("to", "prev_path")
                 edgeObj.put("transform", "euclidean_delta")
                 edgeObj.put("delta", JSONObject().apply {
-                    put("dx", pos[0] - prev[0])
-                    put("dy", pos[1] - prev[1])
-                    put("dz", pos[2] - prev[2])
+                    put("dx", prev[0] - pos[0])
+                    put("dy", prev[1] - pos[1])
+                    put("dz", prev[2] - pos[2])
                 })
                 edgesArray.put(edgeObj)
             }
@@ -320,14 +328,15 @@ class ImuNetworkBridge(
         }
 
         // Manual Graph Edges (from PoseGraph)
+        // Translation in SE3 matrix (indices 12, 13, 14) is negated
         edges?.forEach { edge ->
             val edgeObj = JSONObject()
             edgeObj.put("to", "node_${edge.to}")
             edgeObj.put("transform", "SE3")
             edgeObj.put("delta", JSONObject().apply {
-                put("dx", edge.transform[12])
-                put("dy", edge.transform[13])
-                put("dz", edge.transform[14])
+                put("dx", -edge.transform[12])
+                put("dy", -edge.transform[13])
+                put("dz", -edge.transform[14])
             })
             edgesArray.put(edgeObj)
         }
@@ -349,8 +358,9 @@ class ImuNetworkBridge(
         if (now - lastSendTime < 10) return // ~100Hz
         lastSendTime = now
 
+        // Linear acceleration is negated to match the negated coordinate system
         val data = JSONObject().apply {
-            put("ax", ax); put("ay", ay); put("az", az)
+            put("ax", -ax); put("ay", -ay); put("az", -az)
             put("gx", gx); put("gy", gy); put("gz", gz)
         }
         sendCoreState(type = "imu", rawData = data)
@@ -362,7 +372,7 @@ class ImuNetworkBridge(
                 val legacy = JSONObject().apply {
                     put("type", "imu")
                     put("data", JSONObject().apply {
-                        put("x", ax); put("y", ay); put("z", az)
+                        put("x", -ax); put("y", -ay); put("z", -az)
                     })
                 }
                 currentClient.send(legacy.toString())
@@ -390,6 +400,7 @@ class ImuNetworkBridge(
 
     /**
      * 📍 Send path data
+     * Protocol Alignment: Negates x, y, z for Web Visualizer centering
      */
     fun sendPathPoint(x: Float, y: Float, z: Float) {
         val currentClient = client
@@ -403,9 +414,9 @@ class ImuNetworkBridge(
             if (currentClient != null && currentClient.isOpen) {
                 val legacy = JSONObject().apply {
                     put("type", "path_point")
-                    put("x", x)
-                    put("y", y)
-                    put("z", z)
+                    put("x", -x)
+                    put("y", -y)
+                    put("z", -z)
                     put("user", user)
                 }
                 currentClient.send(legacy.toString())
@@ -415,10 +426,15 @@ class ImuNetworkBridge(
 
     /**
      * 📍 Send AR anchor (Matches Server: msg.type === "ar_anchor")
+     * NEGATES anchor coordinates for Web Visualizer centering (-x, -y, -z)
      */
     fun sendAnchor(x: Float, y: Float, z: Float) {
         val data = JSONObject().apply {
-            put("anchor", JSONObject().apply { put("x", x); put("y", y); put("z", z) })
+            put("anchor", JSONObject().apply { 
+                put("x", -x) 
+                put("y", -y) 
+                put("z", -z) 
+            })
         }
         sendCoreState(type = "ar_anchor", rawData = data)
 
@@ -429,7 +445,7 @@ class ImuNetworkBridge(
                 val legacy = JSONObject().apply {
                     put("type", "ar_anchor")
                     put("anchor", JSONObject().apply {
-                        put("x", x); put("y", y); put("z", z)
+                        put("x", -x); put("y", -y); put("z", -z)
                     })
                 }
                 currentClient.send(legacy.toString())
@@ -439,10 +455,11 @@ class ImuNetworkBridge(
 
     /**
      * 📍 Send Vertical Plane
+     * Protocol Alignment: Negates x, y, z for Web Visualizer centering
      */
     fun sendVerticalPlane(x: Float, y: Float, z: Float, height: Float, alpha: Float) {
         val data = JSONObject().apply {
-            put("pos", JSONObject().apply { put("x", x); put("y", y); put("z", z) })
+            put("pos", JSONObject().apply { put("x", -x); put("y", -y); put("z", -z) })
             put("height", height)
             put("alpha", alpha)
         }
@@ -455,7 +472,7 @@ class ImuNetworkBridge(
                 val legacy = JSONObject().apply {
                     put("type", "ar_vertical_plane")
                     put("pos", JSONObject().apply {
-                        put("x", x); put("y", y); put("z", z)
+                        put("x", -x); put("y", -y); put("z", -z)
                     })
                     put("height", height)
                     put("alpha", alpha)
@@ -467,10 +484,11 @@ class ImuNetworkBridge(
 
     /**
      * 📍 Send POI (Point of Interest)
+     * Protocol Alignment: Negates x, y, z for Web Visualizer centering
      */
     fun sendPoi(x: Float, y: Float, z: Float) {
         val data = JSONObject().apply {
-            put("x", x); put("y", y); put("z", z)
+            put("x", -x); put("y", -y); put("z", -z)
             put("user", user)
         }
         sendCoreState(type = "poi", pos = floatArrayOf(x, y, z), rawData = data)
@@ -481,7 +499,7 @@ class ImuNetworkBridge(
             if (currentClient != null && currentClient.isOpen) {
                 val legacy = JSONObject().apply {
                     put("type", "poi")
-                    put("x", x); put("y", y); put("z", z)
+                    put("x", -x); put("y", -y); put("z", -z)
                     put("user", user)
                 }
                 currentClient.send(legacy.toString())

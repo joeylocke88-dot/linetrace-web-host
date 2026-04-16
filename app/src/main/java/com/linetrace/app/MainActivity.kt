@@ -674,17 +674,15 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
             // and ensure the old one is closed first.
             if (::imuBridge.isInitialized && !imuBridge.isConnected) {
                 Log.d("MainActivity", "Bridge disconnected on resume, checking if we need to refresh...")
-                // We don't necessarily need to create a new bridge here because 
-                // ImuNetworkBridge has its own auto-reconnect logic.
-                // Only re-create if it's completely dead or we want to force a fresh start.
             }
             
             // Standard ARCore session management
+            // FIX: Ensure GLSurfaceView is resumed BEFORE session.resume() to avoid width <= 0 race
+            glView.onResume()
             session.resume()
             renderer.onResume()
             renderer.session = session
             tracker.start()
-            glView.onResume()
         } catch (e: Exception) {
             val msg = e.message ?: "Unknown error"
             Toast.makeText(this, "AR Session Error: $msg", Toast.LENGTH_LONG).show()
@@ -953,10 +951,10 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
                 arSession = null
                 
                 arSession = arController.ensureInstalledAndCreateSession()
+                glView.onResume() // Resume GL first
                 arSession?.resume()
                 renderer.onResume()
                 renderer.session = arSession
-                glView.onResume()
                 Toast.makeText(this, getString(R.string.msg_cold_success), Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(this, getString(R.string.msg_lazarus_fail, e.message), Toast.LENGTH_LONG).show()

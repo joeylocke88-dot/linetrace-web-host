@@ -340,6 +340,10 @@ class LineRenderer(
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        if (width <= 0 || height <= 0) {
+            Log.w("LineRenderer", "onSurfaceChanged: Invalid dimensions ($width x $height)")
+            return
+        }
         viewportWidth = width
         viewportHeight = height
         GLES30.glViewport(0, 0, width, height)
