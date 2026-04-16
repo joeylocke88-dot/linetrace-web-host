@@ -227,6 +227,7 @@
         console.log(`📥 [${msg.type || 'unknown'}]`, msg);
 
         if (msg.type === 'anchor' && msg.anchor) {
+          // Alignment Fix: Use pre-negated coordinates from Android directly
           if (worldRoot) {
             worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
           }

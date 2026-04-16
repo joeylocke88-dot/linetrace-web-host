@@ -206,17 +206,22 @@ class WorldSyncManager(
         transport.onDeltaReceived { delta ->
             if (delta.senderId != localId) {
                 val data = delta.surfelData.duplicate().order(ByteOrder.LITTLE_ENDIAN)
-                if (data.remaining() == 16) {
+                val remaining = data.remaining()
+                
+                if (remaining == 16) {
                     // Path Point: x, y, z, stability
+                    // Protocol Alignment: These are already negated by the sender (ImuNetworkBridge)
                     val x = data.float
                     val y = data.float
                     val z = data.float
                     val s = data.float
                     remotePathCallback?.invoke(x, y, z, s)
-                } else {
-                    // World Surfel Chunk
-                    Log.d("WorldSync", "Received world delta (${data.remaining()} bytes) from ${delta.senderId}")
+                } else if (remaining > 0 && remaining % 64 == 0) {
+                    // World Surfel Chunk (64-byte blocks)
+                    Log.d("WorldSync", "Received world delta ($remaining bytes) from ${delta.senderId}")
                     streamer.addSurfelsAsync(delta.surfelData)
+                } else {
+                    Log.w("WorldSync", "Received malformed delta ($remaining bytes) - Discarding")
                 }
             }
         }
