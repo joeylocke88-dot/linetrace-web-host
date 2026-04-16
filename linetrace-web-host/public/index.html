@@ -224,8 +224,8 @@
 
         if (msg.type === 'anchor' && msg.anchor) {
           if (worldRoot) {
-            // Subtracting the anchor to center the session origin at (0,0,0) in Three.js
-            worldRoot.position.set(-msg.anchor.x || 0, -msg.anchor.y || 0, -msg.anchor.z || 0);
+            // Use anchor directly as Android now pre-negates coordinates for centering
+            worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
             document.getElementById('stat-anchor').textContent =
               `[${msg.anchor.x.toFixed(2)}, ${msg.anchor.y.toFixed(2)}, ${msg.anchor.z.toFixed(2)}] (Aligned)`;
           }
@@ -253,7 +253,7 @@
 
   function handleSyncState(state) {
     if (state.anchor) {
-      worldRoot.position.set(-state.anchor.x || 0, -state.anchor.y || 0, -state.anchor.z || 0);
+      worldRoot.position.set(state.anchor.x || 0, state.anchor.y || 0, state.anchor.z || 0);
     }
 
     if (state.paths) {

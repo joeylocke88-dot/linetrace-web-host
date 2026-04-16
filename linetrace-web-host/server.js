@@ -14,7 +14,7 @@ if (!process.env.RENDER) {
 }
 
 const PUBLIC_DIR = path.join(__dirname, "public");
-const WORLD_FILE = process.env.RENDER ? "/opt/render/project/src/world_state.json" : path.join(__dirname, "world_state.json");
+const WORLD_FILE = process.env.RENDER ? "/tmp/world_state.json" : path.join(__dirname, "world_state.json");
 
 // =========================
 // SHARED WORLD STATE
