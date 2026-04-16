@@ -1,5 +1,6 @@
 package com.linetrace.app.ui
 
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -81,6 +82,8 @@ class SessionSelectorFragment(
         inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
             val name: TextView = view.findViewById(R.id.sessionName)
             val details: TextView = view.findViewById(R.id.sessionDetails)
+            val indicator: View = view.findViewById(R.id.sessionStatusIndicator)
+            val duration: TextView = view.findViewById(R.id.sessionDuration)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -96,10 +99,27 @@ class SessionSelectorFragment(
             val date = Date(file.lastModified())
             val size = file.length() / 1024
             
-            // Format: [DATE] | [SIZE] | STATUS: OK
-            holder.details.text = "[${dateFormat.format(date).uppercase()}] | ${size}KB | SYNC: READY"
+            // Format: [DATE] | [SIZE]
+            holder.details.text = "[${dateFormat.format(date).uppercase()}] | ${size}KB"
             
-            holder.itemView.setOnClickListener { 
+            // Heuristic for duration based on file size (since it's binary surfel data)
+            // Assuming ~64 bytes per surfel, and maybe 30 surfels per second on average
+            val estimatedSeconds = size * 1024 / (64 * 30)
+            val mins = estimatedSeconds / 60
+            val secs = estimatedSeconds % 60
+            holder.duration.text = String.format("%02d:%02d", mins, secs)
+
+            // Visual indicator: Cyan for recent (last hour), dimmed for older
+            val ageMs = System.currentTimeMillis() - file.lastModified()
+            if (ageMs < 3600000) {
+                holder.indicator.setBackgroundColor(Color.parseColor("#00FFFF"))
+                holder.indicator.alpha = 1.0f
+            } else {
+                holder.indicator.setBackgroundColor(Color.parseColor("#008888"))
+                holder.indicator.alpha = 0.5f
+            }
+
+            holder.itemView.setOnClickListener {
                 holder.itemView.alpha = 0.5f
                 onClick(file)
                 // Dismiss on main thread to avoid window leak/sync issues
