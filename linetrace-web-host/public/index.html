@@ -32,6 +32,22 @@
       color: #00ff88;
       z-index: 100;
       font-size: 12px;
+      pointer-events: none;
+      text-shadow: 1px 1px 2px black;
+    }
+
+    #stats-overlay {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: #00ffff;
+      font-family: monospace;
+      font-size: 10px;
+      text-align: right;
+      background: rgba(0,0,0,0.4);
+      padding: 5px;
+      border-radius: 4px;
+      pointer-events: none;
     }
 
     .legend {
@@ -88,6 +104,11 @@
 </div>
 
 <div id="status"></div>
+<div id="stats-overlay">
+  SURFELS: <span id="stat-surfels">0</span><br/>
+  DELTA PKTS: <span id="stat-deltas">0</span><br/>
+  LAST ANCHOR: <span id="stat-anchor">None</span>
+</div>
 
 <script>
   // =========================
@@ -97,6 +118,11 @@
   let scene, camera, renderer;
   let worldRoot = null;
   let ws = null;
+
+  let stats = {
+    surfels: 0,
+    deltas: 0
+  };
 
   let currentRoom = "default";
   const paths = new Map();
@@ -143,6 +169,10 @@
     // Ground grid
     const grid = new THREE.GridHelper(100, 50, 0x444444, 0x222222);
     scene.add(grid);
+
+    // Coordinate Axes for World Root
+    const axesHelper = new THREE.AxesHelper(5);
+    worldRoot.add(axesHelper);
 
     camera.position.set(0, 8, 15);
     camera.lookAt(0, 0, 0);
@@ -194,7 +224,10 @@
 
         if (msg.type === 'anchor' && msg.anchor) {
           if (worldRoot) {
-            worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
+            // Subtracting the anchor to center the session origin at (0,0,0) in Three.js
+            worldRoot.position.set(-msg.anchor.x || 0, -msg.anchor.y || 0, -msg.anchor.z || 0);
+            document.getElementById('stat-anchor').textContent =
+              `[${msg.anchor.x.toFixed(2)}, ${msg.anchor.y.toFixed(2)}, ${msg.anchor.z.toFixed(2)}] (Aligned)`;
           }
         }
 
@@ -220,7 +253,7 @@
 
   function handleSyncState(state) {
     if (state.anchor) {
-      worldRoot.position.set(state.anchor.x || 0, state.anchor.y || 0, state.anchor.z || 0);
+      worldRoot.position.set(-state.anchor.x || 0, -state.anchor.y || 0, -state.anchor.z || 0);
     }
 
     if (state.paths) {
@@ -242,6 +275,12 @@
 
   function resetWorld() {
     log("World Reset");
+    stats.surfels = 0;
+    stats.deltas = 0;
+    document.getElementById('stat-surfels').textContent = "0";
+    document.getElementById('stat-deltas').textContent = "0";
+    document.getElementById('stat-anchor').textContent = "None";
+
     // Clear Paths
     paths.forEach(p => worldRoot.remove(p.mesh));
     paths.clear();
@@ -273,12 +312,21 @@
     if (!msg.surfelData) return;
 
     // Decode Base64
-    const binary = atob(msg.surfelData);
+    let binary;
+    try {
+      binary = atob(msg.surfelData);
+    } catch (e) {
+      console.error("Base64 decode failed", e);
+      return;
+    }
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
     const dataView = new DataView(bytes.buffer);
-    const count = bytes.length / 64;
+    if (bytes.length % 64 !== 0) {
+      console.warn(`Malformed surfel data: length ${bytes.length} is not a multiple of 64`);
+    }
+    const count = Math.floor(bytes.length / 64);
 
     if (!surfelPoints) {
       const geometry = new THREE.BufferGeometry();
@@ -294,6 +342,9 @@
     const posAttr = surfelPoints.geometry.attributes.position;
     const colAttr = surfelPoints.geometry.attributes.color;
     let idx = surfelPoints.userData.index;
+
+    stats.deltas++;
+    document.getElementById('stat-deltas').textContent = stats.deltas;
 
     for (let i = 0; i < count; i++) {
       const offset = i * 64;
@@ -315,8 +366,10 @@
       colAttr.array[writeIdx + 2] = b;
 
       idx = (idx + 1) % MAX_SURFELS;
+      if (stats.surfels < MAX_SURFELS) stats.surfels++;
     }
 
+    document.getElementById('stat-surfels').textContent = stats.surfels;
     surfelPoints.userData.index = idx;
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
@@ -360,7 +413,14 @@
 
     const i = obj.index * 3;
 
-    const p = msg.point || { x: msg.x || 0, y: msg.y || 0, z: msg.z || 0 };
+    let p = msg.point;
+    if (!p) {
+        if (msg.state && msg.state.pos) {
+            p = { x: msg.state.pos.x, y: msg.state.pos.y, z: msg.state.pos.z };
+        } else {
+            p = { x: msg.x || 0, y: msg.y || 0, z: msg.z || 0 };
+        }
+    }
 
     // Write point into buffer
     array[i] = p.x;

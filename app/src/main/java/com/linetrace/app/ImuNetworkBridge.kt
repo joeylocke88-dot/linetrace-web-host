@@ -206,6 +206,9 @@ class ImuNetworkBridge(
         
         val remaining = delta.surfelData.remaining()
         if (remaining <= 0) return
+        if (remaining % 64 != 0) {
+            Log.w("ImuNetworkBridge", "Broadcasting malformed delta: $remaining bytes (not multiple of 64)")
+        }
 
         val json = JSONObject()
         json.put("type", "world_delta")
