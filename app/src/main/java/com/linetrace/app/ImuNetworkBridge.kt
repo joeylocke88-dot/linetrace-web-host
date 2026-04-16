@@ -107,6 +107,10 @@ class ImuNetworkBridge(
         
         try {
             val newClient = object : WebSocketClient(URI(uriStr)) {
+                init {
+                    // Detect stale connections (Render often drops idle sockets)
+                    connectionLostTimeout = 20 
+                }
                 override fun onOpen(handshakedata: ServerHandshake?) {
                     isConnecting = false
                     if (this != client) return
@@ -170,19 +174,17 @@ class ImuNetworkBridge(
                 override fun onClose(code: Int, reason: String?, remote: Boolean) {
                     isConnecting = false
                     if (this != client) return
-                    Log.d("ImuNetworkBridge", "Disconnected: $reason (Remote: $remote)")
+                    Log.w("ImuNetworkBridge", "CLOSED: code=$code, reason='$reason', remote=$remote")
                     if (!isClosedIntentionally) {
-                        scheduleReconnect(3000)
+                        scheduleReconnect(5000)
                     }
                 }
 
                 override fun onError(ex: Exception?) {
                     isConnecting = false
                     if (this != client) return
-                    Log.e("ImuNetworkBridge", "Connection Error: ${ex?.message}")
-                    if (!isClosedIntentionally) {
-                        scheduleReconnect(5000)
-                    }
+                    Log.e("ImuNetworkBridge", "ERROR: ${ex?.message}")
+                    ex?.printStackTrace()
                 }
             }
             client = newClient
@@ -222,9 +224,18 @@ class ImuNetworkBridge(
         }
         
         val base64Data = android.util.Base64.encodeToString(bytes, 0, remaining, android.util.Base64.NO_WRAP)
+        if (base64Data.isNullOrEmpty()) {
+            Log.w("ImuNetworkBridge", "Base64 encoding failed for delta of size $remaining")
+            return
+        }
         json.put("surfelData", base64Data)
         
-        currentClient.send(json.toString())
+        try {
+            currentClient.send(json.toString())
+            // Log.v("ImuNetworkBridge", "Sent world_delta: $remaining bytes")
+        } catch (e: Exception) {
+            Log.e("ImuNetworkBridge", "Failed to send world_delta", e)
+        }
     }
 
     override fun onDeltaReceived(callback: (WorldDelta) -> Unit) {

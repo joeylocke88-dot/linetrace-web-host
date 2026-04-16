@@ -390,11 +390,16 @@ class LineRenderer(
                     if (deltaCount > 0) {
                         val deltaData = gpuSolver.downloadSurfelDelta(prevCount, deltaCount)
                         if (deltaData != null) {
+                            deltaData.rewind() // Ensure buffer is ready for reading
                             val senderId = java.util.UUID.nameUUIDFromBytes(wsManager.user.toByteArray())
-                            wsManager.broadcastDelta(WorldDelta(senderId, frame.timestamp, deltaData))
+                            
+                            // 🚀 Throttle surfel sync to avoid saturating Render's WebSocket connection
+                            if (frameCount % 3 == 0) {
+                                worldSync.broadcastDelta(WorldDelta(senderId, frame.timestamp, deltaData))
+                            }
                             
                             // 📊 Fusion Rate Monitoring
-                            if (System.currentTimeMillis() % 1000 < 1000) { // Force log every fusion (every 10 frames)
+                            if (frameCount % 60 == 0) {
                                 Log.i("FusionMonitor", "Active Fusion: +$deltaCount surfels | Total: $newCount | Sync: OK")
                             }
                         }

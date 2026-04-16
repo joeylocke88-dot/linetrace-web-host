@@ -12,15 +12,17 @@
         android:id="@+id/sessionName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="@android:color/white"
+        android:textColor="@color/tactical_cyan"
         android:textSize="16sp"
+        android:typeface="monospace"
         android:textStyle="bold" />
 
     <TextView
         android:id="@+id/sessionDetails"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="@android:color/darker_gray"
-        android:textSize="14sp" />
+        android:textColor="#88FFFFFF"
+        android:typeface="monospace"
+        android:textSize="12sp" />
 
 </LinearLayout>

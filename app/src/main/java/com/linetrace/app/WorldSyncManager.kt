@@ -253,7 +253,7 @@ class WorldSyncManager(
         }
 
         val request = Request.Builder()
-            .url("https://linetrace-server-5vj2.onrender.com/telemetry")
+            .url("https://linetrace-web.onrender.com/telemetry")
             .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -272,6 +272,10 @@ class WorldSyncManager(
         val data = chunk.surfelData ?: return
         val buffer = data.duplicate().order(ByteOrder.LITTLE_ENDIAN)
         syncLocalBatch(buffer)
+    }
+
+    fun broadcastDelta(delta: WorldDelta) {
+        transport?.broadcastDelta(delta)
     }
 
     fun close() {

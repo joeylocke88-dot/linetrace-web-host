@@ -201,6 +201,7 @@
         if (msg.type === 'path_point') handlePathPoint(msg);
         if (msg.type === 'pose') handlePose(msg);
         if (msg.type === 'ar_vertical_plane') handleVerticalPlane(msg);
+        if (msg.type === 'world_delta') handleWorldDelta(msg);
         if (msg.type === 'reset_world') resetWorld();
       } catch (err) {
         console.warn('Bad message', err, e.data);
@@ -252,6 +253,73 @@
     // Clear Planes
     planeMarkers.forEach(p => worldRoot.remove(p));
     planeMarkers.clear();
+
+    // Clear Surfels
+    if (surfelPoints) {
+      worldRoot.remove(surfelPoints);
+      surfelPoints.geometry.dispose();
+      surfelPoints.material.dispose();
+      surfelPoints = null;
+    }
+  }
+
+  // =========================
+  // SURFEL RENDERING (Dense Map)
+  // =========================
+  let surfelPoints = null;
+  const MAX_SURFELS = 100000;
+
+  function handleWorldDelta(msg) {
+    if (!msg.surfelData) return;
+
+    // Decode Base64
+    const binary = atob(msg.surfelData);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    const dataView = new DataView(bytes.buffer);
+    const count = bytes.length / 64;
+
+    if (!surfelPoints) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
+
+      const material = new THREE.PointsMaterial({ size: 0.02, vertexColors: true });
+      surfelPoints = new THREE.Points(geometry, material);
+      worldRoot.add(surfelPoints);
+      surfelPoints.userData.index = 0;
+    }
+
+    const posAttr = surfelPoints.geometry.attributes.position;
+    const colAttr = surfelPoints.geometry.attributes.color;
+    let idx = surfelPoints.userData.index;
+
+    for (let i = 0; i < count; i++) {
+      const offset = i * 64;
+      // Surfel structure (64 bytes): px, py, pz, radius, nx, ny, nz, conf, r, g, b, ...
+      const px = dataView.getFloat32(offset, true);
+      const py = dataView.getFloat32(offset + 4, true);
+      const pz = dataView.getFloat32(offset + 8, true);
+      const r = dataView.getFloat32(offset + 32, true);
+      const g = dataView.getFloat32(offset + 36, true);
+      const b = dataView.getFloat32(offset + 40, true);
+
+      const writeIdx = idx * 3;
+      posAttr.array[writeIdx] = px;
+      posAttr.array[writeIdx + 1] = py;
+      posAttr.array[writeIdx + 2] = pz;
+
+      colAttr.array[writeIdx] = r;
+      colAttr.array[writeIdx + 1] = g;
+      colAttr.array[writeIdx + 2] = b;
+
+      idx = (idx + 1) % MAX_SURFELS;
+    }
+
+    surfelPoints.userData.index = idx;
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
   }
 
   // =========================
