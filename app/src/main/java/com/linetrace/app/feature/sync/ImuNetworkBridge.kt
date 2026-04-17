@@ -30,7 +30,22 @@ class ImuNetworkBridge(
     private val handler = Handler(Looper.getMainLooper())
     private var isClosedIntentionally = false
     private var isConnecting = false
-    private var currentServerUrl = serverUrl
+    private var currentServerUrl: String = ""
+
+    init {
+        currentServerUrl = normalizeUrl(serverUrl)
+    }
+
+    private fun normalizeUrl(url: String): String {
+        val clean = url.trim().lowercase().removeSuffix("/")
+        return when {
+            clean.startsWith("ws://") || clean.startsWith("wss://") -> clean
+            clean.startsWith("https://") -> clean.replace("https://", "wss://")
+            clean.startsWith("http://") -> clean.replace("http://", "ws://")
+            clean.contains("onrender.com") -> "wss://$clean"
+            else -> "ws://$clean:10000"
+        }
+    }
 
     val isConnected: Boolean
         get() = client?.isOpen == true
@@ -49,12 +64,8 @@ class ImuNetworkBridge(
     // Pre-allocated buffers for zero-allocation streaming
     private val surfelTransferArray = ByteArray(2000 * 64)
 
-    init {
-        connect()
-    }
-
     fun updateServerUrl(newUrl: String) {
-        val cleanUrl = newUrl.removeSuffix("/")
+        val cleanUrl = normalizeUrl(newUrl)
         if (currentServerUrl != cleanUrl) {
             Log.i("ImuNetworkBridge", "Updating server URL from $currentServerUrl to $cleanUrl")
             currentServerUrl = cleanUrl
@@ -94,15 +105,10 @@ class ImuNetworkBridge(
         client = null
         isConnecting = true
 
-        val baseUrl = currentServerUrl.removeSuffix("/")
-        val uriStr = if (baseUrl.startsWith("ws://") || baseUrl.startsWith("wss://")) {
-            if (baseUrl.contains("onrender.com")) {
-                "$baseUrl/?room=$room&user=$user"
-            } else {
-                "$baseUrl/?room=$room&user=$user"
-            }
+        val uriStr = if (currentServerUrl.contains("?")) {
+            "$currentServerUrl&room=$room&user=$user"
         } else {
-            "ws://$baseUrl:10000/?room=$room&user=$user"
+            "$currentServerUrl/?room=$room&user=$user"
         }
         
         Log.i("ImuNetworkBridge", "Connecting to: $uriStr")
@@ -537,6 +543,7 @@ class ImuNetworkBridge(
         val json = JSONObject().apply {
             put("type", "reset_world")
             put("user", user)
+            put("room", room)
         }
         try {
             currentClient.send(json.toString())

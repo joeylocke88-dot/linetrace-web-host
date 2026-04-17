@@ -189,10 +189,9 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         val prefs = getSharedPreferences("LineTracePrefs", Context.MODE_PRIVATE)
         val savedIp = prefs.getString("server_ip", "10.69.232.32") ?: "10.69.232.32"
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        val serverUrl = if (savedIp.startsWith("ws://")) savedIp else "ws://$savedIp:10000/"
         
         imuBridge = ImuNetworkBridge(
-            serverUrl = serverUrl,
+            serverUrl = savedIp,
             room = "default",
             user = "android_$deviceId"
         )
@@ -269,14 +268,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         recorder = SessionRecorder(getExternalFilesDir("sessions"))
         arController = ArCoreController(this)
 
-        val serverUrl = when {
-            targetIp.startsWith("ws://") || targetIp.startsWith("wss://") -> targetIp
-            targetIp.startsWith("https://") -> targetIp.replace("https://", "wss://")
-            targetIp.startsWith("http://") -> targetIp.replace("http://", "ws://")
-            targetIp.contains("onrender.com") -> "wss://$targetIp"
-            else -> "ws://$targetIp:10000/"
-        }
-        imuBridge.updateServerUrl(serverUrl)
+        imuBridge.updateServerUrl(targetIp)
         
         imuBridge.messageListener = object : ImuNetworkBridge.MessageListener {
             override fun onPoseReceived(timestamp: Long, pos: FloatArray, rot: FloatArray) {
@@ -824,7 +816,9 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
             val distance = recorder.getDistance()
             val points = recorder.getPointCount()
             val recording = renderer.isRecording
-            dashboard.updateState(state, tracking, distance, points, recording, false)
+            val surfels = renderer.getSurfelCount()
+            val depth = renderer.currentCenterDepth
+            dashboard.updateState(state, tracking, distance, points, recording, false, surfels, depth)
             maybeHaptic(state.stability)
         }
     }

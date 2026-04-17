@@ -56,6 +56,8 @@ class StabilityDashboard @JvmOverloads constructor(
     private var isRecording = false
     private var distanceTravelled = 0f
     private var totalPoints = 0
+    private var surfelCount = 0
+    private var centerDepth = 0f
     
     private val graphPath = Path()
     private val backgroundPaint = Paint().apply {
@@ -75,13 +77,15 @@ class StabilityDashboard @JvmOverloads constructor(
 
     private var engagementLock = false
 
-    fun updateState(state: FusedState?, isTracking: Boolean, distance: Float = 0f, points: Int = 0, recording: Boolean = false, locked: Boolean = false) {
+    fun updateState(state: FusedState?, isTracking: Boolean, distance: Float = 0f, points: Int = 0, recording: Boolean = false, locked: Boolean = false, surfels: Int = 0, depth: Float = 0f) {
         tracking = isTracking
         lastState = state
         distanceTravelled = distance
         totalPoints = points
         isRecording = recording
         engagementLock = locked
+        surfelCount = surfels
+        centerDepth = depth
         if (state != null) {
             history[historyIndex] = state.stability.coerceIn(0f, 1f)
             historyIndex = (historyIndex + 1) % history.size
@@ -142,12 +146,23 @@ class StabilityDashboard @JvmOverloads constructor(
         xPos += 240f
         drawLabelValueCompact(canvas, "DIST", String.format("%.1fm", distanceTravelled), xPos, yPos)
         
-        // Secondary Row for coordinates
+        // SONAR / MAPPING DATA
+        xPos += 240f
+        val sonarColor = if (centerDepth > 0 && centerDepth < 2.0f) Color.YELLOW else if (centerDepth >= 2.0f) Color.CYAN else Color.GRAY
+        drawLabelValueCompact(canvas, "SONAR", if (centerDepth > 0) String.format("%.2fm", centerDepth) else "---", xPos, yPos, sonarColor)
+        
+        // Secondary Row for coordinates and mapping density
         val yPos2 = 100f + safePaddingTop
         xPos = 60f
         state?.let {
             drawLabelValueCompact(canvas, "POS", String.format("%.1f, %.1f, %.1f", it.x, it.y, it.z), xPos, yPos2)
         }
+        xPos += 350f
+        drawLabelValueCompact(canvas, "SURFELS", String.format("%d", surfelCount), xPos, yPos2)
+        
+        xPos += 200f
+        val density = (surfelCount / 10000f).coerceIn(0f, 1f)
+        drawLabelValueCompact(canvas, "GRID", String.format("%.1f%%", density * 100), xPos, yPos2, if (density > 0.8f) Color.GREEN else Color.CYAN)
         
         // Recording Indicator
         if (isRecording) {

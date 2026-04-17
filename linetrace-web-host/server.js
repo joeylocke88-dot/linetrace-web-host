@@ -68,7 +68,27 @@ process.on("SIGINT", gracefulShutdown);
 // =========================
 
 const server = http.createServer((req, res) => {
-  const urlPath = decodeURIComponent(new URL(req.url || "/", `http://${req.headers.host}`).pathname);
+  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  const urlPath = decodeURIComponent(url.pathname);
+
+  // Handle Telemetry POST
+  if (req.method === "POST" && urlPath === "/telemetry") {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const telemetry = JSON.parse(body);
+        console.log(`📊 Telemetry from ${telemetry.senderId || 'unknown'}: ${telemetry.distance}m, ${telemetry.points} pts`);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end("Invalid JSON");
+      }
+    });
+    return;
+  }
+
   let filePath = path.join(PUBLIC_DIR, urlPath === "/" ? "index.html" : urlPath);
 
   filePath = path.resolve(filePath);
@@ -180,6 +200,16 @@ wss.on("connection", (ws, req) => {
         saveWorldState();
         broadcast(room, { type: "anchor", anchor: worldState.anchor, version: worldState.version, sender: user }, ws);
       }
+      return;
+    }
+
+    // 3. Reset Command
+    if (msg.type === "reset_world") {
+      console.log(`🔄 World reset triggered by ${user} in room ${room}`);
+      worldState.anchor = { x: 0, y: 0, z: 0 };
+      worldState.version = 1;
+      saveWorldState();
+      broadcast(room, { type: "anchor", anchor: worldState.anchor, version: worldState.version, status: "RESET" });
       return;
     }
 

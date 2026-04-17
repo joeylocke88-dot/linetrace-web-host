@@ -366,6 +366,9 @@ class LineRenderer(
         _session?.setDisplayGeometry(displayRotation, width, height)
     }
 
+    @Volatile var latestFusedState: FusedState? = null
+    @Volatile var currentCenterDepth: Float = 0f
+
     override fun onDrawFrame(gl: GL10?) {
         val now = System.nanoTime()
         val isStalled = (now - lastFrameNanos) > 100_000_000L // 100ms
@@ -562,6 +565,7 @@ class LineRenderer(
 
                 if (fusion.hasPose) {
                     val f = fusion.fusedState()
+                    latestFusedState = f
                     frameCallback?.onFusedState(f)
                     
                     // Throttle Pose updates to server (Matches Three.js frequency)
@@ -586,6 +590,12 @@ class LineRenderer(
                     try {
                         val depthImage = frame.acquireDepthImage16Bits()
                         updateDepthTexture(depthImage)
+                        
+                        // Sample Center Depth for SONAR
+                        val centerDepth = sampleCenterDepth(depthImage)
+                        currentCenterDepth = centerDepth
+                        frameCallback?.onDepthUpdate(centerDepth)
+                        
                         depthImage.close()
                     } catch (e: Exception) {}
 
@@ -666,6 +676,7 @@ class LineRenderer(
                         val surfelCount = gpuSolver.getSurfelCount(gpuSolver.getActiveBufferIndex())
                         
                         GLES30.glUniform1i(GLES30.glGetUniformLocation(diagnosticProgram, "uSurfelCount"), surfelCount)
+                        GLES30.glUniform1i(GLES30.glGetUniformLocation(diagnosticProgram, "uIsHypervisor"), if (isHypervisor) 1 else 0)
                         GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, surfelSSBO)
                         GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 1, gridSSBO)
 
@@ -692,6 +703,37 @@ class LineRenderer(
         val plane = image.planes[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cameraDepthTextureId)
         GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RG8, image.width, image.height, 0, GLES30.GL_RG, GLES30.GL_UNSIGNED_BYTE, plane.buffer)
+    }
+
+    private fun sampleCenterDepth(image: android.media.Image): Float {
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val width = image.width
+        val height = image.height
+        
+        // Sample 5x5 area around center and average
+        val cx = width / 2
+        val cy = height / 2
+        var sum = 0f
+        var count = 0
+        
+        for (y in (cy - 2)..(cy + 2)) {
+            for (x in (cx - 2)..(cx + 2)) {
+                if (x in 0 until width && y in 0 until height) {
+                    val offset = y * rowStride + x * pixelStride
+                    val d0 = buffer.get(offset).toInt() and 0xFF
+                    val d1 = buffer.get(offset + 1).toInt() and 0xFF
+                    val depthMm = d0 or (d1 shl 8)
+                    if (depthMm > 0) {
+                        sum += depthMm / 1000f
+                        count++
+                    }
+                }
+            }
+        }
+        return if (count > 0) sum / count else 0f
     }
 
     private fun drawPois() {
@@ -864,6 +906,10 @@ class LineRenderer(
                 Log.d("LineRenderer", "Adaptive anchoring applied: $dx, $dy, $dz")
             }
         }
+    }
+
+    fun getSurfelCount(): Int {
+        return gpuSolver.getSurfelCount(gpuSolver.getActiveBufferIndex())
     }
 
     fun startTracing(x: Float, y: Float, z: Float, anchor: Anchor? = null) {
@@ -1132,6 +1178,7 @@ class LineRenderer(
             uniform vec3 uWorldMin;
             uniform float uCellSize;
             uniform int uStalled;
+            uniform int uIsHypervisor;
             in vec2 vUv;
             out vec4 outColor;
 
@@ -1197,6 +1244,7 @@ class LineRenderer(
                 
                 float t = 0.1; 
                 float accum = 0.0;
+                float colorVar = 0.0;
                 float maxT = length(worldPos - camPos);
                 float stepSize = maxT / 32.0;
                 
@@ -1211,14 +1259,22 @@ class LineRenderer(
                     uint endIdx = (key < 1048575u) ? gridOffsets[key + 1u] : uint(uSurfelCount);
                     
                     float minSdf = 1.0; // Pruning radius
+                    uint bestJ = 0u;
                     for(uint j = startIdx; j < endIdx; j++) {
                         if (j >= uint(uSurfelCount)) break;
                         float sdf = surfelSDF(p, surfels[j]);
-                        minSdf = min(minSdf, sdf);
+                        if (sdf < minSdf) {
+                            minSdf = sdf;
+                            bestJ = j;
+                        }
                     }
                     
                     float field = exp(-max(0.0, minSdf) * 60.0);
                     field *= 0.8 + 0.2 * sin(t * 10.0 - uTime * 5.0);
+                    
+                    // Procedural variation based on surfel ID
+                    float h = fract(sin(float(surfels[bestJ].id.x) * 12.9898) * 43758.5453);
+                    colorVar += h * field * 0.25;
                     accum += field * 0.25;
                     
                     if (minSdf < 0.01) t += 0.005; // Tighten step near surface
@@ -1226,9 +1282,26 @@ class LineRenderer(
                 }
 
                 accum = clamp(accum, 0.0, 1.0);
-                vec3 finalRgb = vec3(0.0, 0.6, 1.0);
+                float finalH = (accum > 0.0) ? (colorVar / accum) : 0.0;
+                
+                // Cyan Blue variants for surfels
+                vec3 baseColor = vec3(0.0, 0.6, 1.0);
+                vec3 variant = vec3(0.0, 0.4 + 0.4 * finalH, 0.8 + 0.2 * finalH);
+                vec3 finalRgb = mix(baseColor, variant, 0.5);
+
+                // Hypervisor Mode Scan Grid (Ghost Orange overlay)
+                if (uIsHypervisor == 1) {
+                    vec3 p = camPos + rayDir * maxT;
+                    vec3 gp = p * 10.0;
+                    float grid = 0.0;
+                    grid += smoothstep(0.95, 1.0, sin(gp.x));
+                    grid += smoothstep(0.95, 1.0, sin(gp.y));
+                    grid += smoothstep(0.95, 1.0, sin(gp.z));
+                    finalRgb = mix(finalRgb, vec3(1.0, 0.6, 0.0), clamp(grid * 0.4, 0.0, 1.0));
+                }
+
                 if (uStalled == 1) {
-                    finalRgb = vec3(1.0, 0.3, 0.0); // Orange warning for Mirror Shield mode
+                    finalRgb = vec3(1.0, 0.2, 0.0); // Redder orange for Mirror Shield mode
                     accum *= (0.8 + 0.2 * sin(uTime * 15.0)); // Stronger pulse
                 }
                 outColor = vec4(finalRgb * accum, accum * 0.7);

@@ -7,6 +7,10 @@
     <color name="neon_cyan">#00E5FF</color>
     <color name="tactical_cyan">#00E5FF</color>
     <color name="neon_cyan_glow">#4D00E5FF</color> <!-- 30% alpha -->
+
+    <color name="ghost_orange">#FF9800</color>
+    <color name="ghost_orange_dim">#33FF9800</color>
+
     <color name="deep_navy">#050F19</color>
     <color name="tactical_bg">#050F19</color>
     <color name="tactical_overlay">#CC050F19</color> <!-- 80% Navy -->

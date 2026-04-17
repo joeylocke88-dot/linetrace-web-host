@@ -198,8 +198,18 @@ wss.on("connection", (ws, req) => {
           anchor: worldState.anchor,
           version: worldState.version,
           sender: user
-        }, ws); // Optional: skip sender to avoid echo if client handles it
+        }, ws);
       }
+      return;
+    }
+
+    // 3. Reset Command
+    if (msg.type === "reset_world") {
+      console.log(`🔄 World reset triggered by ${user} in room ${room}`);
+      worldState.anchor = { x: 0, y: 0, z: 0 };
+      worldState.version = 1;
+      saveWorldState();
+      broadcast(room, { type: "anchor", anchor: worldState.anchor, version: worldState.version, status: "RESET" });
       return;
     }
 
