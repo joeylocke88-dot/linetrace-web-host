@@ -46,21 +46,20 @@ class SessionSelectorFragment(
             typeface = android.graphics.Typeface.MONOSPACE
             paintFlags = paintFlags or android.graphics.Paint.FAKE_BOLD_TEXT_FLAG
             
-            // Live Status Poller
+            val mainHandler = Handler(Looper.getMainLooper())
             val updateStatus = object : Runnable {
                 override fun run() {
+                    if (!isAdded) return
                     val connected = networkBridge?.isConnected == true
                     val status = if (connected) " [ONLINE]" else " [OFFLINE]"
                     text = "> MISSION LOGS_V2.0$status"
                     setTextColor(if (connected) 
                         ContextCompat.getColor(context, R.color.tactical_cyan) else Color.RED)
                     
-                    if (isAdded) {
-                        handler.postDelayed(this, 1000)
-                    }
+                    mainHandler.postDelayed(this, 1000)
                 }
             }
-            handler.post(updateStatus)
+            mainHandler.post(updateStatus)
         }
         root.addView(title)
 

@@ -130,7 +130,11 @@ const server = http.createServer((req, res) => {
 // =========================
 // WEB SOCKET SERVER
 // =========================
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({
+  server,
+  clientTracking: true,
+  perMessageDeflate: false // Often causes issues on free-tier Render or mobile clients
+});
 const rooms = new Map(); // roomName → Map<user, ws>
 
 function heartbeat() { this.isAlive = true; }
@@ -176,9 +180,18 @@ wss.on("connection", (ws, req) => {
     try {
       msg = JSON.parse(raw);
     } catch (e) {
+      console.error(`[${room}] Invalid JSON from ${user}:`, raw.toString().substring(0, 100));
       return;
     }
     if (!msg || typeof msg !== "object") return;
+
+    // Verbose logging for debugging telemetry issues
+    if (msg.type === "imu" || msg.type === "pose") {
+        // Log every 100th message or so to avoid flooding, or just log high level
+        if (Math.random() < 0.01) console.log(`[${room}] Telemetry heartbeat from ${user}: ${msg.type}`);
+    } else {
+        console.log(`[${room}] Received ${msg.type} from ${user}`);
+    }
 
     // Preserve original fields if present (from Android Core State)
     msg.node = msg.node || user;

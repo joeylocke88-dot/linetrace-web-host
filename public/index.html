@@ -238,7 +238,14 @@
 
         if (msg.type === 'path_point') handlePathPoint(msg);
         if (msg.type === 'pose') handlePose(msg);
+        if (msg.type === 'imu') handlePose(msg); // Treat IMU like a pose for visualizer heartbeats
         if (msg.type === 'poi') handlePoi(msg);
+        if (msg.type === 'ar_anchor') {
+           // Direct mapping for ar_anchor protocol
+           if (msg.anchor && worldRoot) {
+               worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
+           }
+        }
         if (msg.type === 'ar_vertical_plane') handleVerticalPlane(msg);
         if (msg.type === 'world_delta') handleWorldDelta(msg);
         if (msg.type === 'thermal_heartbeat') handleThermalHeartbeat(msg);

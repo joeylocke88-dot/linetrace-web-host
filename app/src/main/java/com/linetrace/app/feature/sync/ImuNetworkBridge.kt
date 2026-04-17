@@ -12,6 +12,11 @@ import org.json.JSONObject
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import java.security.cert.X509Certificate
+import java.security.SecureRandom
 
 class ImuNetworkBridge(
     val serverUrl: String,
@@ -74,7 +79,7 @@ class ImuNetworkBridge(
             // Force a reset of the connection state
             isConnecting = false
             cleanup()
-            connect()
+            // connect() // Removed auto-connect to let MainActivity control lifecycle
         }
     }
 
@@ -91,7 +96,19 @@ class ImuNetworkBridge(
         client = null
     }
 
-    private fun connect() {
+    fun onConnectionStatusChanged(callback: (Boolean, String?) -> Unit) {
+        this.statusCallback = callback
+    }
+    
+    private var statusCallback: ((Boolean, String?) -> Unit)? = null
+
+    private fun updateStatus(connected: Boolean, message: String? = null) {
+        handler.post {
+            statusCallback?.invoke(connected, message)
+        }
+    }
+
+    fun connect() {
         if (isConnecting) return
         
         // Cancel any pending reconnection tasks
@@ -114,16 +131,41 @@ class ImuNetworkBridge(
         Log.i("ImuNetworkBridge", "Connecting to: $uriStr")
         
         try {
-            val newClient = object : WebSocketClient(URI(uriStr)) {
+            val uri = URI(uriStr)
+            val newClient = object : WebSocketClient(uri) {
                 init {
                     // Detect stale connections (Render often drops idle sockets)
                     connectionLostTimeout = 20 
+                    
+                    if (uriStr.startsWith("wss://", ignoreCase = true)) {
+                        setupSsl()
+                    }
                 }
+
+                private fun setupSsl() {
+                    try {
+                        val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                        })
+
+                        val sc = SSLContext.getInstance("TLS")
+                        sc.init(null, trustAllCerts, SecureRandom())
+                        setSocketFactory(sc.socketFactory)
+                        Log.d("ImuNetworkBridge", "SSL configured for wss:// (TrustAll)")
+                    } catch (e: Exception) {
+                        Log.e("ImuNetworkBridge", "Failed to setup SSL", e)
+                    }
+                }
+
                 override fun onOpen(handshakedata: ServerHandshake?) {
                     isConnecting = false
                     if (this != client) return
                     Log.i("ImuNetworkBridge", "SUCCESS: Connected to $uriStr")
+                    updateStatus(true, "Connected to $room")
                     isClosedIntentionally = false
+                    flushPending()
                 }
 
                 override fun onMessage(message: String?) {
@@ -184,6 +226,7 @@ class ImuNetworkBridge(
                     isConnecting = false
                     if (this != client) return
                     Log.w("ImuNetworkBridge", "CLOSED: code=$code, reason='$reason', remote=$remote")
+                    updateStatus(false, "Disconnected: $reason")
                     if (!isClosedIntentionally) {
                         scheduleReconnect(5000)
                     }
@@ -193,6 +236,7 @@ class ImuNetworkBridge(
                     isConnecting = false
                     if (this != client) return
                     Log.e("ImuNetworkBridge", "ERROR: ${ex?.message}")
+                    updateStatus(false, "Error: ${ex?.message}")
                     ex?.printStackTrace()
                 }
             }
@@ -283,7 +327,7 @@ class ImuNetworkBridge(
 
         // Log one in every 100 messages to verify data flow without flooding
         if (Math.random() < 0.01) {
-            Log.d("ImuNetworkBridge", "Outgoing: $type at $timestamp")
+            Log.d("ImuNetworkBridge", "Outgoing: $type at $timestamp | isConnected: ${client?.isOpen}")
         }
 
         // 1. STATE (Pos, Vel, Rot)
@@ -412,7 +456,10 @@ class ImuNetworkBridge(
      */
     fun sendPathPoint(x: Float, y: Float, z: Float) {
         val currentClient = client
-        if (currentClient == null || !currentClient.isOpen) return
+        if (currentClient == null || !currentClient.isOpen) {
+            if (Math.random() < 0.01) Log.w("ImuNetworkBridge", "Cannot send path_point: Client NULL or CLOSED")
+            return
+        }
 
         sendCoreState(type = "path_point", pos = floatArrayOf(x, y, z))
         
@@ -444,7 +491,7 @@ class ImuNetworkBridge(
                 put("z", -z) 
             })
         }
-        sendCoreState(type = "ar_anchor", rawData = data)
+        sendCoreState(type = "ar_anchor", pos = floatArrayOf(x, y, z), rawData = data)
 
         // Legacy support
         try {
@@ -471,7 +518,7 @@ class ImuNetworkBridge(
             put("height", height)
             put("alpha", alpha)
         }
-        sendCoreState(type = "ar_vertical_plane", rawData = data)
+        sendCoreState(type = "ar_vertical_plane", pos = floatArrayOf(x, y, z), rawData = data)
 
         // Legacy support
         try {
@@ -530,29 +577,56 @@ class ImuNetworkBridge(
         sendCoreState(type = "thermal_heartbeat", rawData = data)
     }
 
+    private val pendingMessages = mutableListOf<String>()
+
     /**
      * 🔄 Clear World State on Server
      */
     fun sendReset() {
-        val currentClient = client
-        if (currentClient == null || !currentClient.isOpen) {
-            Log.w("ImuNetworkBridge", "Cannot send reset: WebSocket not connected")
-            return
-        }
-
         val json = JSONObject().apply {
             put("type", "reset_world")
             put("user", user)
             put("room", room)
         }
-        try {
-            currentClient.send(json.toString())
-        } catch (e: Exception) {
-            Log.e("ImuNetworkBridge", "Failed to send reset: ${e.message}")
-        }
+        enqueueOrSend(json.toString())
         
         // Also send as core state for graph consistency
         sendCoreState(type = "reset_world")
+    }
+
+    private fun enqueueOrSend(message: String) {
+        val currentClient = client
+        if (currentClient != null && currentClient.isOpen) {
+            try {
+                currentClient.send(message)
+            } catch (e: Exception) {
+                Log.e("ImuNetworkBridge", "Failed to send: ${e.message}")
+                synchronized(pendingMessages) { pendingMessages.add(message) }
+            }
+        } else {
+            Log.d("ImuNetworkBridge", "Queueing message (Socket not open)")
+            synchronized(pendingMessages) {
+                if (pendingMessages.size > 100) pendingMessages.removeAt(0)
+                pendingMessages.add(message)
+            }
+        }
+    }
+
+    private fun flushPending() {
+        val currentClient = client
+        if (currentClient == null || !currentClient.isOpen) return
+        
+        synchronized(pendingMessages) {
+            val iterator = pendingMessages.iterator()
+            while (iterator.hasNext()) {
+                try {
+                    currentClient.send(iterator.next())
+                    iterator.remove()
+                } catch (e: Exception) {
+                    break
+                }
+            }
+        }
     }
 
     fun close() {

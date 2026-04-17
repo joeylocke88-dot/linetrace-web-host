@@ -195,6 +195,14 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
             room = "default",
             user = "android_$deviceId"
         )
+        
+        imuBridge.onConnectionStatusChanged { isConnected, message ->
+            if (isConnected) {
+                Toast.makeText(this, "Sync: $message", Toast.LENGTH_SHORT).show()
+            } else if (message != null && !message.contains("Closing existing connection")) {
+                Toast.makeText(this, "Sync: $message", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // 2. Start CleanupService when activity is active and in foreground
         // Moved to onResume to avoid BackgroundServiceStartNotAllowedException
@@ -246,7 +254,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         }
 
         findViewById<View>(R.id.btnIpCloud).setOnClickListener {
-            editIp.setText("wss://linetrace-web.onrender.com")
+            editIp.setText("linetrace-web-host.onrender.com")
         }
     }
 
@@ -269,6 +277,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         arController = ArCoreController(this)
 
         imuBridge.updateServerUrl(targetIp)
+        imuBridge.connect()
         
         imuBridge.messageListener = object : ImuNetworkBridge.MessageListener {
             override fun onPoseReceived(timestamp: Long, pos: FloatArray, rot: FloatArray) {
@@ -659,6 +668,10 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
             startService(Intent(this, CleanupService::class.java))
         } catch (e: Exception) {
             Log.e("MainActivity", "Failed to start CleanupService in onResume: ${e.message}")
+        }
+
+        if (::imuBridge.isInitialized) {
+            imuBridge.connect()
         }
 
         if (isInitialized) {

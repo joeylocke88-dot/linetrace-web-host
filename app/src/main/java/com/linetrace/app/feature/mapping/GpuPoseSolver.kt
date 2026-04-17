@@ -106,6 +106,8 @@ class GpuPoseSolver(private val context: Context) {
         GLES31.glBufferData(GLES31.GL_SHADER_STORAGE_BUFFER, MAX_NODES * 16, null, GLES31.GL_DYNAMIC_DRAW)
         
         GLES31.glGenBuffers(1, pcSSBO, 0)
+        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, pcSSBO[0])
+        GLES31.glBufferData(GLES31.GL_SHADER_STORAGE_BUFFER, 65536 * 16, null, GLES31.GL_DYNAMIC_DRAW)
 
         GLES31.glGenBuffers(2, surfelSSBO, 0)
         for (i in 0..1) {
