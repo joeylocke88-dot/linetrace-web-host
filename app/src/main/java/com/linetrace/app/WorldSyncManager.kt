@@ -46,7 +46,7 @@ class WorldSyncManager(
         private var callback: ((WorldDelta) -> Unit)? = null
 
         fun connect(room: String = "default") {
-            val url = "wss://linetrace-web.onrender.com?room=$room&user=android_${localId.toString().take(8)}"
+            val url = "wss://linetrace-web-host.onrender.com?room=$room&user=android_${localId.toString().take(8)}"
             Log.d("WorldSync", "Connecting to WebSocket: $url")
             val request = Request.Builder()
                 .url(url)
@@ -258,7 +258,7 @@ class WorldSyncManager(
         }
 
         val request = Request.Builder()
-            .url("https://linetrace-web.onrender.com/telemetry")
+            .url("https://linetrace-web-host.onrender.com/telemetry")
             .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
