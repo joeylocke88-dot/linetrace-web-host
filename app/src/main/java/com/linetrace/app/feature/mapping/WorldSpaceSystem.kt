@@ -1,4 +1,7 @@
-package com.linetrace.app
+package com.linetrace.app.feature.mapping
+import com.linetrace.app.core.Point
+import com.linetrace.app.core.PointType
+import com.linetrace.app.core.FusedState
 
 import android.opengl.GLES31
 import android.opengl.Matrix
