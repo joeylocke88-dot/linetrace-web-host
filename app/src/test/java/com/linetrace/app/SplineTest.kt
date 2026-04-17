@@ -1,4 +1,10 @@
 package com.linetrace.app
+import com.linetrace.app.feature.perception.FusionEngine
+import com.linetrace.app.feature.telemetry.PathBuffer
+import com.linetrace.app.presentation.LineRenderer
+import com.linetrace.app.feature.perception.MotionTracker
+import com.linetrace.app.core.Point
+import com.linetrace.app.feature.telemetry.SessionRecorder
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

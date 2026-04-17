@@ -1,4 +1,6 @@
 package com.linetrace.app
+import com.linetrace.app.feature.telemetry.PathBuffer
+import com.linetrace.app.core.Point
 
 import org.junit.Assert.*
 import org.junit.Test

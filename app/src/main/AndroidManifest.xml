@@ -11,7 +11,7 @@
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
 
     <application
-        android:name=".LineTraceApp"
+        android:name=".infra.LineTraceApp"
         android:allowBackup="true"
         android:label="LineTrace AR"
         android:supportsRtl="true"
@@ -21,7 +21,7 @@
         <meta-data android:name="com.google.ar.core" android:value="required" />
 
         <activity
-            android:name=".MainActivity"
+            android:name=".presentation.MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="fullSensor">
@@ -32,7 +32,7 @@
         </activity>
 
         <service
-            android:name=".CleanupService"
+            android:name=".infra.CleanupService"
             android:stopWithTask="false"
             android:exported="false" />
     </application>

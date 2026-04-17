@@ -1,4 +1,5 @@
 package com.linetrace.app
+import com.linetrace.app.feature.telemetry.SessionRecorder
 
 import org.json.JSONObject
 import org.junit.Assert.*
