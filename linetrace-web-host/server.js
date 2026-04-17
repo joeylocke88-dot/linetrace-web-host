@@ -133,7 +133,11 @@ const server = http.createServer((req, res) => {
 // WEB SOCKET SERVER
 // =========================
 
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({
+  server,
+  clientTracking: true,
+  perMessageDeflate: false
+});
 const rooms = new Map(); // roomName → Map<user, ws>
 
 function heartbeat() {
@@ -181,6 +185,7 @@ wss.on("connection", (ws, req) => {
     try {
       msg = JSON.parse(raw);
     } catch (e) {
+      console.error(`[${room}] Invalid JSON from ${user}:`, raw.toString().substring(0, 100));
       return;
     }
 
@@ -190,6 +195,13 @@ wss.on("connection", (ws, req) => {
     msg.node = msg.node || user;
     msg.room = room;
     if (!msg.timestamp) msg.timestamp = Date.now();
+
+    // Verbose logging for debugging telemetry issues
+    if (msg.type === "imu" || msg.type === "pose") {
+        if (Math.random() < 0.01) console.log(`[${room}] Telemetry heartbeat from ${user}: ${msg.type}`);
+    } else {
+        console.log(`[${room}] Received ${msg.type} from ${user}`);
+    }
 
     // 1. Authoritative Anchor Updates
     if (msg.type === "anchor" || msg.type === "ar_anchor") {
