@@ -185,9 +185,9 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 1. Initialize bridge with last known IP or default ASAP to avoid race conditions
+        // 1. Initialize bridge with Render Production URL or default ASAP to avoid race conditions
         val prefs = getSharedPreferences("LineTracePrefs", Context.MODE_PRIVATE)
-        val savedIp = prefs.getString("server_ip", "10.69.232.32") ?: "10.69.232.32"
+        val savedIp = prefs.getString("server_ip", "linetrace-web-host.onrender.com") ?: "linetrace-web-host.onrender.com"
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         
         imuBridge = ImuNetworkBridge(
