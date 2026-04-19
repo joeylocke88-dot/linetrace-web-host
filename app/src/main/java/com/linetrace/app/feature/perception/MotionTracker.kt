@@ -56,7 +56,6 @@ class MotionTracker(val context: Context) : SensorEventListener {
     private var lastAccelTimestamp = 0L
     private var lastProcessedTimestamp = 0L
 
-    private var currentSamplingRate = SensorManager.SENSOR_DELAY_FASTEST
     private var isHighPowerMode = true
 
     // Draw Data Integration: Direct sensor-to-renderer pipe
@@ -70,25 +69,24 @@ class MotionTracker(val context: Context) : SensorEventListener {
     fun setPowerMode(highPower: Boolean) {
         if (isHighPowerMode == highPower) return
         isHighPowerMode = highPower
-        currentSamplingRate = if (highPower) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_UI
         
         if (registered) {
             stop()
             start()
         }
-        android.util.Log.i("MotionTracker", "Power mode changed: HighPower=$highPower, Rate=$currentSamplingRate")
+        android.util.Log.i("MotionTracker", "Power mode changed: HighPower=$highPower")
     }
 
     fun start() {
         if (registered) return
         // Upgrading to SENSOR_DELAY_FASTEST (~200Hz+) for Tactical/High-Precision
         // Now authorized via HIGH_SAMPLING_RATE_SENSORS permission
-        sensorManager.registerListener(this, accelerometer, currentSamplingRate, sensorHandler)
+        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST, sensorHandler)
         gyroscope?.let {
-            sensorManager.registerListener(this, it, currentSamplingRate, sensorHandler)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST, sensorHandler)
         }
         rotationVector?.let {
-            sensorManager.registerListener(this, it, currentSamplingRate, sensorHandler)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST, sensorHandler)
         }
         lightSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)

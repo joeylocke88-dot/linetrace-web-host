@@ -127,13 +127,6 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
                             if (this@MainActivity::renderer.isInitialized) {
                                 renderer.updateThermalState(currentTemperature)
                             }
-                            
-                            // Proactive Thermal Throttling: Drop sensor rate if temp > 42C
-                            if (currentTemperature > 42f && this@MainActivity::tracker.isInitialized) {
-                                tracker.setPowerMode(false)
-                            } else if (currentTemperature < 38f && this@MainActivity::tracker.isInitialized) {
-                                tracker.setPowerMode(true)
-                            }
                         }
                         "com.linetrace.app.SIMULATE_STALL" -> {
                         Log.w("MainActivity", "Lazarus: Simulating GL Stall...")
@@ -974,15 +967,6 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
     }
 
     private fun triggerRealityAlignment() {
-        // Thermal Throttling: Prevent resurrection if device is overheating (> 45°C)
-        // RapidPass: Bypass thermal safety in Hypervisor mode
-        if (currentTemperature > 45f && !renderer.isHypervisor) {
-            uiHandler.post {
-                Toast.makeText(this, getString(R.string.msg_alignment_blocked, currentTemperature), Toast.LENGTH_LONG).show()
-            }
-            return
-        }
-
         uiHandler.post {
             Toast.makeText(this, getString(R.string.msg_alignment_init), Toast.LENGTH_SHORT).show()
             Toast.makeText(this, getString(R.string.msg_resurrection_try), Toast.LENGTH_SHORT).show()

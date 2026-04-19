@@ -259,11 +259,9 @@ object ShaderSource {
             // Interleaved Gradient Noise for temporal jittering
             float jitter = fract(sin(dot(vUv * fract(uTime), vec2(12.9898, 78.233))) * 43758.5453);
             
-            // Adaptive Step Count based on device temperature
-            // OPTIMIZATION: Further reduce steps during critical heat (uThermalTemp > 45)
-            // and use half-steps for Segment 1 to prioritize Surface over Path.
-            int stepsS1 = (uThermalTemp > 42.0) ? 4 : 8;
-            int stepsS2 = (uThermalTemp > 45.0) ? 4 : ((uThermalTemp > 42.0) ? 8 : 16);
+            // Adaptive Step Count
+            int stepsS1 = 8;
+            int stepsS2 = 16;
             
             // Segment 1: Camera Vicinity (Path Trail)
             float t1_start = 0.05;

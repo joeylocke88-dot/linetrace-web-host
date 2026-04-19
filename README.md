@@ -39,7 +39,8 @@ Responders can mark "Safe/Clear" paths through post-disaster zones where landmar
 - **Fusion Engine:** Adaptive Kalman filter that fuses ARCore VIO with high-frequency IMU data.
 - **Lazarus Protocol:** A 100ms heartbeat monitor that ensures the GL/Native context "resurrects" instantly after a crash or stall.
 - **Tactical HUD:** Speed-adaptive line widths (14f to 28f) and perspective-aware depth bias to prevent Z-fighting.
-- **Thermal Management:** Proactive throttling that drops sensor sampling frequency if battery temperature exceeds 42°C.
+- **GPU Boost:** Offloads expensive Surfel Fusion and PGO to a high-performance PC server via a zero-allocation binary pipeline.
+- **Thermal Immunity:** Removes all software-level thermal throttling (sensor rates, marching steps) to maintain peak performance under load.
 
 ---
 
