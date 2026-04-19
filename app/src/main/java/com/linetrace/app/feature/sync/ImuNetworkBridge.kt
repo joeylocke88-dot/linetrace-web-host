@@ -76,11 +76,20 @@ class ImuNetworkBridge(
     private var lastPathPos: FloatArray? = null
     
     // Pre-allocated buffers for zero-allocation streaming
-    private val surfelTransferArray = ByteArray(2000 * 64)
+    private val surfelTransferArray = ByteArray(2000 * 64 + 9)
     private val surfelTransferBuffer = ByteBuffer.wrap(surfelTransferArray).order(ByteOrder.LITTLE_ENDIAN)
     
-    private val pcTransferArray = ByteArray(65536 * 16)
+    private val pcTransferArray = ByteArray(65536 * 16 + 9)
     private val pcTransferBuffer = ByteBuffer.wrap(pcTransferArray).order(ByteOrder.LITTLE_ENDIAN)
+
+    private val poseTransferArray = ByteArray(1 + 8 + 64) 
+    private val poseTransferBuffer = ByteBuffer.wrap(poseTransferArray).order(ByteOrder.LITTLE_ENDIAN)
+
+    companion object {
+        private const val TYPE_POINT_CLOUD: Byte = 0x01
+        private const val TYPE_WORLD_DELTA: Byte = 0x02
+        private const val TYPE_CAMERA_POSE: Byte = 0x03
+    }
 
     fun sendPointCloud(pcData: FloatBuffer) {
         val currentClient = client
@@ -90,28 +99,37 @@ class ImuNetworkBridge(
         if (remaining <= 0) return
 
         val byteSize = remaining * 4
-        val json = JSONObject()
-        json.put("type", "compute_pc")
-        json.put("user", user)
-        json.put("timestamp", System.currentTimeMillis())
-
-        val bytes = if (byteSize <= pcTransferArray.size) {
-            pcTransferBuffer.clear()
-            val floatView = pcTransferBuffer.asFloatBuffer()
-            floatView.put(pcData.duplicate())
-            pcTransferArray
-        } else {
-            val b = ByteArray(byteSize)
-            val dup = pcData.duplicate()
-            ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().put(dup)
-            b
-        }
-
-        json.put("data", android.util.Base64.encodeToString(bytes, 0, byteSize, android.util.Base64.NO_WRAP))
+        
+        pcTransferBuffer.clear()
+        pcTransferBuffer.put(TYPE_POINT_CLOUD)
+        pcTransferBuffer.putLong(System.currentTimeMillis())
+        
+        pcTransferBuffer.asFloatBuffer().put(pcData.duplicate())
+        
         try {
-            currentClient.send(json.toString())
+            pcTransferBuffer.position(0)
+            pcTransferBuffer.limit(1 + 8 + byteSize)
+            currentClient.send(pcTransferBuffer)
         } catch (e: Exception) {
-            Log.e("ImuNetworkBridge", "Failed to send point cloud", e)
+            Log.e("ImuNetworkBridge", "Failed to send binary point cloud", e)
+        }
+    }
+
+    fun sendCameraPose(matrix: FloatArray, timestamp: Long) {
+        val currentClient = client
+        if (currentClient == null || !currentClient.isOpen) return
+
+        poseTransferBuffer.clear()
+        poseTransferBuffer.put(TYPE_CAMERA_POSE)
+        poseTransferBuffer.putLong(timestamp)
+        
+        for (v in matrix) poseTransferBuffer.putFloat(v)
+
+        try {
+            poseTransferBuffer.flip()
+            currentClient.send(poseTransferBuffer)
+        } catch (e: Exception) {
+            Log.e("ImuNetworkBridge", "Failed to send binary camera pose", e)
         }
     }
 
@@ -293,6 +311,27 @@ class ImuNetworkBridge(
                     }
                 }
 
+                override fun onMessage(bytes: ByteBuffer?) {
+                    if (this != client || bytes == null) return
+                    try {
+                        bytes.order(ByteOrder.LITTLE_ENDIAN)
+                        val type = bytes.get()
+                        when (type) {
+                            TYPE_WORLD_DELTA -> {
+                                val timestamp = bytes.long
+                                val msb = bytes.long
+                                val lsb = bytes.long
+                                val senderId = java.util.UUID(msb, lsb)
+                                
+                                val surfelData = bytes.slice().order(ByteOrder.LITTLE_ENDIAN)
+                                worldDeltaCallback?.invoke(WorldDelta(senderId, timestamp, surfelData))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ImuNetworkBridge", "Error parsing binary message", e)
+                    }
+                }
+
                 override fun onClose(code: Int, reason: String?, remote: Boolean) {
                     isConnecting = false
                     if (this != client) return
@@ -331,43 +370,25 @@ class ImuNetworkBridge(
         val remaining = delta.surfelData.remaining()
         if (remaining <= 0) return
 
-        // Protocol Integrity: Surfel packets MUST be exact multiples of 64 bytes
         if (remaining % 64 != 0) {
-            Log.e("ImuNetworkBridge", "REJECTED: Malformed delta ($remaining bytes is not multiple of 64)")
+            Log.e("ImuNetworkBridge", "REJECTED: Malformed delta ($remaining bytes)")
             return
         }
 
-        val json = JSONObject()
-        json.put("type", "world_delta")
-        json.put("senderId", delta.senderId.toString())
-        json.put("timestamp", delta.timestamp)
+        // Zero-Allocation Binary Path for Surfel Deltas
+        surfelTransferBuffer.clear()
+        surfelTransferBuffer.put(TYPE_WORLD_DELTA)
+        surfelTransferBuffer.putLong(delta.timestamp)
         
-        // Reuse pre-allocated array if possible to avoid GC churn
-        val bytes = if (remaining <= surfelTransferArray.size) {
-            surfelTransferBuffer.clear()
-            val dup = delta.surfelData.duplicate()
-            surfelTransferBuffer.put(dup)
-            surfelTransferArray
-        } else {
-            Log.w("ImuNetworkBridge", "Delta size $remaining exceeds reusable buffer, falling back to allocation")
-            val b = ByteArray(remaining)
-            val dup = delta.surfelData.duplicate()
-            dup.get(b)
-            b
-        }
-        
-        val base64Data = android.util.Base64.encodeToString(bytes, 0, remaining, android.util.Base64.NO_WRAP)
-        if (base64Data.isNullOrEmpty()) {
-            Log.w("ImuNetworkBridge", "Base64 encoding failed for delta of size $remaining")
-            return
-        }
-        json.put("surfelData", base64Data)
+        val dup = delta.surfelData.duplicate()
+        surfelTransferBuffer.put(dup)
         
         try {
-            currentClient.send(json.toString())
-            // Log.v("ImuNetworkBridge", "Sent world_delta: $remaining bytes")
+            surfelTransferBuffer.position(0)
+            surfelTransferBuffer.limit(1 + 8 + remaining)
+            currentClient.send(surfelTransferBuffer)
         } catch (e: Exception) {
-            Log.e("ImuNetworkBridge", "Failed to send world_delta", e)
+            Log.e("ImuNetworkBridge", "Failed to send binary world_delta", e)
         }
     }
 

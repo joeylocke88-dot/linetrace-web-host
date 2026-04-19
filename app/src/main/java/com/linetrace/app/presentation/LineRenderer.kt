@@ -331,16 +331,10 @@ class LineRenderer(
                 frame.camera.displayOrientedPose.toMatrix(surfelFusionCameraMatrix, 0)
                 
                 if (isHypervisor) {
-                    // GPU Boost: Offload point cloud and camera pose for remote surfel fusion
+                    // GPU Boost: Offload point cloud and camera pose via True Binary Path
                     val pcBuffer = pc.points
                     wsManager.sendPointCloud(pcBuffer)
-                    val poseJson = JSONObject().apply {
-                        val matrixArr = JSONArray()
-                        for (v in surfelFusionCameraMatrix) matrixArr.put(v)
-                        put("cameraPose", matrixArr)
-                        put("timestamp", frame.timestamp)
-                    }
-                    wsManager.sendComputeTask("surfel_fusion", poseJson)
+                    wsManager.sendCameraPose(surfelFusionCameraMatrix, frame.timestamp)
                 } else {
                     val prevCount = gpuSolver.getSurfelCount(gpuSolver.getActiveBufferIndex())
                     gpuSolver.fuseSurfels(pc.points, surfelFusionCameraMatrix, frame.timestamp)

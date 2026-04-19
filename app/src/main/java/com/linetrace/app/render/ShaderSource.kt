@@ -3,6 +3,7 @@ package com.linetrace.app.render
 object ShaderSource {
     const val VERTEX_SHADER = """
         uniform mat4 uMvpMatrix; 
+        uniform vec3 uOffset;
         uniform float uDepthBias; 
         uniform float uTime;
         attribute vec4 aPosition; 
@@ -12,7 +13,7 @@ object ShaderSource {
         varying float vTime;
         void main() { 
             float quality = aPosition.w;
-            vec3 posOffset = aPosition.xyz;
+            vec3 posOffset = aPosition.xyz + uOffset;
             if (quality < -0.5) {
                 float jitter = sin(aPosition.x * 100.0 + uTime * 30.0) * 0.05;
                 posOffset += vec3(jitter, jitter, jitter);
@@ -76,6 +77,7 @@ object ShaderSource {
 
     const val RIBBON_VERTEX_SHADER = """
         uniform mat4 uMvpMatrix;
+        uniform vec3 uOffset;
         uniform float uDepthBias;
         uniform float uWallHeight;
         attribute vec4 aPosition;
@@ -86,7 +88,7 @@ object ShaderSource {
         varying float vStability;
         uniform float uTime;
         void main() {
-            vec3 pos = aPosition.xyz;
+            vec3 pos = aPosition.xyz + uOffset;
             float stability = aStability;
             if (stability < -0.5) {
                 pos += sin(pos.x * 50.0 + uTime * 30.0) * 0.05;

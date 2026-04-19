@@ -33,8 +33,14 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
     private var vboId = -1
     private var vboNeedsSync = false
     private var vboSyncedSize = 0
+    private var lastVboHead = -1
     private var ribbonVboId = -1
     private var ribbonVboCapacity = 0
+
+    // Epoch-based offset to avoid O(N) CPU shifts
+    private var offsetX = 0f
+    private var offsetY = 0f
+    private var offsetZ = 0f
 
     // Pre-allocated for circular -> linear conversion
     private var renderByteBuffer: ByteBuffer? = null
@@ -99,9 +105,11 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         head = 0
         historySize = 0
         vboSyncedSize = 0
+        lastVboHead = -1
         vboNeedsSync = true
         alienSeed = -1
         hasTempPoint = false
+        offsetX = 0f; offsetY = 0f; offsetZ = 0f
     }
 
     @Synchronized
@@ -132,6 +140,13 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
             floatBuffer.get(data, activeOffset, size * coordsPerPoint)
         }
         
+        // Apply current offset to the exported data so it matches the world
+        for (i in 0 until totalPoints) {
+            data[dataOffset + i * coordsPerPoint] += offsetX
+            data[dataOffset + i * coordsPerPoint + 1] += offsetY
+            data[dataOffset + i * coordsPerPoint + 2] += offsetZ
+        }
+
         // Reset positions
         historyBuffer.position(0)
         floatBuffer.position(0)
@@ -148,16 +163,16 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         if (index < 0 || index >= totalSize) return
         
         if (index < historySize) {
-            out[0] = historyBuffer.get(index * coordsPerPoint)
-            out[1] = historyBuffer.get(index * coordsPerPoint + 1)
-            out[2] = historyBuffer.get(index * coordsPerPoint + 2)
+            out[0] = historyBuffer.get(index * coordsPerPoint) + offsetX
+            out[1] = historyBuffer.get(index * coordsPerPoint + 1) + offsetY
+            out[2] = historyBuffer.get(index * coordsPerPoint + 2) + offsetZ
             out[3] = historyBuffer.get(index * coordsPerPoint + 3)
         } else {
             val activeIdx = index - historySize
             val actualIdx = if (size >= maxPoints) (head + activeIdx) % maxPoints else activeIdx
-            out[0] = floatBuffer.get(actualIdx * coordsPerPoint)
-            out[1] = floatBuffer.get(actualIdx * coordsPerPoint + 1)
-            out[2] = floatBuffer.get(actualIdx * coordsPerPoint + 2)
+            out[0] = floatBuffer.get(actualIdx * coordsPerPoint) + offsetX
+            out[1] = floatBuffer.get(actualIdx * coordsPerPoint + 1) + offsetY
+            out[2] = floatBuffer.get(actualIdx * coordsPerPoint + 2) + offsetZ
             out[3] = floatBuffer.get(actualIdx * coordsPerPoint + 3)
         }
     }
@@ -168,8 +183,6 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         var closestIdx = -1
         val totalSize = historySize + size
         
-        // Performance Optimization: Search backwards from the most recent points first.
-        // Users are statistically more likely to be near the "active" end of the path.
         val p = FloatArray(4)
         for (i in totalSize - 1 downTo 0) {
             getPoint(i, p)
@@ -182,8 +195,6 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
                 minD2 = d2
                 closestIdx = i
             }
-            
-            // Early exit if we find a "perfect" match (within 5mm) to save CPU
             if (minD2 < 0.000025f) break 
         }
         return closestIdx
@@ -192,9 +203,6 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
     @Synchronized
     fun importHistory(data: FloatArray, count: Int) {
         clear()
-        
-        // Count how many non-alien points we have
-        // data[0..3] is alien data (x, y, z, seed)
         val alienX = data[0]
         val alienY = data[1]
         val alienZ = data[2]
@@ -211,71 +219,66 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         vboNeedsSync = true
     }
 
-    /**
-     * Resets GL resources on context loss.
-     */
     fun resetResources() {
         vboId = -1
         ribbonVboId = -1
         ribbonVboCapacity = 0
         vboSyncedSize = 0
+        lastVboHead = -1
         vboNeedsSync = true
     }
 
     private val SIMPLIFICATION_THRESHOLD_SQ = 0.0001f // 1cm squared
     private val MAX_SEGMENT_LENGTH_SQ = 1.0f // 1 meter squared safety limit
 
-    /**
-     * Adds a point with adaptive Catmull-Rom-like stability checks.
-     * Prevents "spikes" during VIO jumps or hardware stalls.
-     */
     @Synchronized
     fun addPoint(x: Float, y: Float, z: Float, stability: Float = 1.0f) {
+        // Adjust input point by reverse-offset so it's stored in local space
+        val lx_local = x - offsetX
+        val ly_local = y - offsetY
+        val lz_local = z - offsetZ
+
         if (size > 0) {
             val lastIdx = if (size >= maxPoints) (head - 1 + maxPoints) % maxPoints else size - 1
             val lx = floatBuffer.get(lastIdx * coordsPerPoint)
             val ly = floatBuffer.get(lastIdx * coordsPerPoint + 1)
             val lz = floatBuffer.get(lastIdx * coordsPerPoint + 2)
             
-            val dx = x - lx
-            val dy = y - ly
-            val dz = z - lz
+            val dx = lx_local - lx
+            val dy = ly_local - ly
+            val dz = lz_local - lz
             val d2 = dx*dx + dy*dy + dz*dz
 
-            // VIO Spike Guard: Reject points that jump > 1m instantly unless stability is 100%
             if (d2 > MAX_SEGMENT_LENGTH_SQ && stability < 0.9f) {
-                android.util.Log.w("PathBuffer", "Ghost Path: VIO Spike Detected (dist: ${Math.sqrt(d2.toDouble())}m). Point suppressed.")
                 return
             }
 
-            // Spatial Simplification: Blend extremely close points
             if (d2 < SIMPLIFICATION_THRESHOLD_SQ) {
-                floatBuffer.put(lastIdx * coordsPerPoint, (lx + x) * 0.5f)
-                floatBuffer.put(lastIdx * coordsPerPoint + 1, (ly + y) * 0.5f)
-                floatBuffer.put(lastIdx * coordsPerPoint + 2, (lz + z) * 0.5f)
+                floatBuffer.put(lastIdx * coordsPerPoint, (lx + lx_local) * 0.5f)
+                floatBuffer.put(lastIdx * coordsPerPoint + 1, (ly + ly_local) * 0.5f)
+                floatBuffer.put(lastIdx * coordsPerPoint + 2, (lz + lz_local) * 0.5f)
                 floatBuffer.put(lastIdx * coordsPerPoint + 3, Math.max(floatBuffer.get(lastIdx * coordsPerPoint + 3), stability))
                 return
             }
         }
 
         if (size >= maxPoints) {
-            // Archive the point being overwritten
             val oldX = floatBuffer.get(head * coordsPerPoint)
             val oldY = floatBuffer.get(head * coordsPerPoint + 1)
             val oldZ = floatBuffer.get(head * coordsPerPoint + 2)
             val oldS = floatBuffer.get(head * coordsPerPoint + 3)
             archivePoint(oldX, oldY, oldZ, oldS)
 
-            floatBuffer.put(head * coordsPerPoint, x)
-            floatBuffer.put(head * coordsPerPoint + 1, y)
-            floatBuffer.put(head * coordsPerPoint + 2, z)
+            floatBuffer.put(head * coordsPerPoint, lx_local)
+            floatBuffer.put(head * coordsPerPoint + 1, ly_local)
+            floatBuffer.put(head * coordsPerPoint + 2, lz_local)
             floatBuffer.put(head * coordsPerPoint + 3, stability)
             head = (head + 1) % maxPoints
         } else {
             ensureCapacity(size + 1)
-            floatBuffer.put(size * coordsPerPoint, x)
-            floatBuffer.put(size * coordsPerPoint + 1, y)
-            floatBuffer.put(size * coordsPerPoint + 2, z)
+            floatBuffer.put(size * coordsPerPoint, lx_local)
+            floatBuffer.put(size * coordsPerPoint + 1, ly_local)
+            floatBuffer.put(size * coordsPerPoint + 2, lz_local)
             floatBuffer.put(size * coordsPerPoint + 3, stability)
             size++
         }
@@ -292,42 +295,24 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         }
     }
 
-    /**
-     * Shifts all points (RAM and History) and marks VRAM for re-sync.
-     * Also offsets the persistent Alien Contact position.
-     */
     fun offsetPoints(dx: Float, dy: Float, dz: Float) {
-        // Shift active window
-        for (i in 0 until size) {
-            floatBuffer.put(i * coordsPerPoint, floatBuffer.get(i * coordsPerPoint) + dx)
-            floatBuffer.put(i * coordsPerPoint + 1, floatBuffer.get(i * coordsPerPoint + 1) + dy)
-            floatBuffer.put(i * coordsPerPoint + 2, floatBuffer.get(i * coordsPerPoint + 2) + dz)
-        }
-        // Shift history archive
-        for (i in 0 until historySize) {
-            historyBuffer.put(i * coordsPerPoint, historyBuffer.get(i * coordsPerPoint) + dx)
-            historyBuffer.put(i * coordsPerPoint + 1, historyBuffer.get(i * coordsPerPoint + 1) + dy)
-            historyBuffer.put(i * coordsPerPoint + 2, historyBuffer.get(i * coordsPerPoint + 2) + dz)
-        }
-        
-        // Shift Alien Contact
+        offsetX += dx
+        offsetY += dy
+        offsetZ += dz
         if (alienSeed != -1) {
             alienX += dx
             alienY += dy
             alienZ += dz
         }
-
-        vboNeedsSync = true
     }
 
-    /**
-     * Renders the path with high performance.
-     */
     @Synchronized
-    fun draw(positionHandle: Int) {
+    fun draw(positionHandle: Int, offsetHandle: Int = -1) {
         syncVboIfNeeded() 
+        if (offsetHandle != -1) {
+            GLES30.glUniform3f(offsetHandle, offsetX, offsetY, offsetZ)
+        }
 
-        // 1. Draw Active (RAM) - Using X, Y, Z, and Stability (W)
         if (size > 0 || hasTempPoint) {
             val active = getBuffer()
             val hasHistory = historySize > 0
@@ -337,7 +322,6 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
             GLES30.glDrawArrays(GLES30.GL_LINE_STRIP, 0, renderSize)
         }
 
-        // 2. Draw History (VRAM)
         if (vboId != -1 && historySize > 0) {
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboId)
             GLES30.glVertexAttribPointer(positionHandle, coordsPerPoint, GLES30.GL_FLOAT, false, 0, 0)
@@ -347,35 +331,32 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         }
     }
 
-    /**
-     * Renders a 3D ribbon/wall based on the path.
-     * Uses GL_TRIANGLE_STRIP to extrude the line vertically.
-     */
     @Synchronized
-    fun drawRibbon(positionHandle: Int, stabilityHandle: Int) {
+    fun drawRibbon(positionHandle: Int, stabilityHandle: Int, offsetHandle: Int = -1) {
+        if (offsetHandle != -1) {
+            GLES30.glUniform3f(offsetHandle, offsetX, offsetY, offsetZ)
+        }
         val totalPoints = size + historySize + (if (hasTempPoint) 1 else 0)
         if (totalPoints < 2) return
 
-        val strideFloats = 5 // x, y, z, heightFactor, stability
+        val strideFloats = 5 
         val strideBytes = strideFloats * 4
         val totalVertices = totalPoints * 2
         val neededSize = totalVertices * strideBytes
 
-        // Ensure VBO is initialized and has enough capacity
         if (ribbonVboId == -1) {
             val vbos = IntArray(1)
             GLES30.glGenBuffers(1, vbos, 0)
             ribbonVboId = vbos[0]
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, ribbonVboId)
-            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, neededSize, null, GLES30.GL_DYNAMIC_DRAW)
-            ribbonVboCapacity = neededSize
+            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, Math.max(neededSize, 2000 * strideBytes), null, GLES30.GL_DYNAMIC_DRAW)
+            ribbonVboCapacity = Math.max(neededSize, 2000 * strideBytes)
         } else if (neededSize > ribbonVboCapacity) {
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, ribbonVboId)
             GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, neededSize, null, GLES30.GL_DYNAMIC_DRAW)
             ribbonVboCapacity = neededSize
         }
 
-        // Prepare local CPU buffer for upload
         if (ribbonByteBuffer == null || ribbonByteBuffer!!.capacity() < neededSize) {
             ribbonByteBuffer = ByteBuffer.allocateDirect(neededSize).order(ByteOrder.nativeOrder())
             ribbonFloatBuffer = ribbonByteBuffer!!.asFloatBuffer()
@@ -384,21 +365,16 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         val out = ribbonFloatBuffer!!
         out.clear()
 
-        // 1. Add History
         for (i in 0 until historySize) {
             val hOffset = i * coordsPerPoint
             val x = historyBuffer.get(hOffset)
             val y = historyBuffer.get(hOffset + 1)
             val z = historyBuffer.get(hOffset + 2)
             val s = historyBuffer.get(hOffset + 3)
-            
-            out.put(x).put(y).put(z).put(0f) // Base: xyz + w=0
-            out.put(s)                       // Stability
-            out.put(x).put(y).put(z).put(1f) // Top: xyz + w=1
-            out.put(s)                       // Stability
+            out.put(x).put(y).put(z).put(0f).put(s)
+            out.put(x).put(y).put(z).put(1f).put(s)
         }
 
-        // 2. Add Active
         for (i in 0 until size) {
             val idx = if (size >= maxPoints) (head + i) % maxPoints else i
             val aOffset = idx * coordsPerPoint
@@ -406,42 +382,32 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
             val y = floatBuffer.get(aOffset + 1)
             val z = floatBuffer.get(aOffset + 2)
             val s = floatBuffer.get(aOffset + 3)
-
-            out.put(x).put(y).put(z).put(0f)
-            out.put(s)
-            out.put(x).put(y).put(z).put(1f)
-            out.put(s)
+            out.put(x).put(y).put(z).put(0f).put(s)
+            out.put(x).put(y).put(z).put(1f).put(s)
         }
 
-        // 3. Add Temp
         if (hasTempPoint) {
-            out.put(tempX).put(tempY).put(tempZ).put(0f)
-            out.put(tempS)
-            out.put(tempX).put(tempY).put(tempZ).put(1f)
-            out.put(tempS)
+            val tx_local = tempX - offsetX
+            val ty_local = tempY - offsetY
+            val tz_local = tempZ - offsetZ
+            out.put(tx_local).put(ty_local).put(tz_local).put(0f).put(tempS)
+            out.put(tx_local).put(ty_local).put(tz_local).put(1f).put(tempS)
         }
 
         out.flip()
-        
-        // Upload to VBO
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, ribbonVboId)
         GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER, 0, neededSize, out)
         
-        // Set pointers using the VBO
         GLES30.glVertexAttribPointer(positionHandle, 4, GLES30.GL_FLOAT, false, strideBytes, 0)
         GLES30.glEnableVertexAttribArray(positionHandle)
-        
         GLES30.glVertexAttribPointer(stabilityHandle, 1, GLES30.GL_FLOAT, false, strideBytes, 16)
         GLES30.glEnableVertexAttribArray(stabilityHandle)
-        
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, totalVertices)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
     }
 
     private fun syncVboIfNeeded() {
-        // Must be called from a @Synchronized context or be @Synchronized itself
         if (!vboNeedsSync) return
-        
         if (vboId == -1) {
             val vbos = IntArray(1)
             GLES30.glGenBuffers(1, vbos, 0)
@@ -456,7 +422,6 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
             val newPoints = historySize - vboSyncedSize
             val offset = vboSyncedSize * coordsPerPoint * 4
             val sizeBytes = newPoints * coordsPerPoint * 4
-            
             historyBuffer.position(vboSyncedSize * coordsPerPoint)
             GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER, offset, sizeBytes, historyBuffer)
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
@@ -481,7 +446,6 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         out.clear()
         
         if (hasHistory) {
-            // Continuity Fix: Prepend the last point of history to the active strip
             val hOffset = (historySize - 1) * coordsPerPoint
             out.put(historyBuffer.get(hOffset))
             out.put(historyBuffer.get(hOffset + 1))
@@ -499,10 +463,7 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
         }
         
         if (hasTempPoint) {
-            out.put(tempX)
-            out.put(tempY)
-            out.put(tempZ)
-            out.put(tempS)
+            out.put(tempX - offsetX).put(tempY - offsetY).put(tempZ - offsetZ).put(tempS)
         }
 
         out.flip()

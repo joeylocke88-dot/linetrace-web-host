@@ -12,9 +12,60 @@ import java.io.IOException
 import java.util.Locale
 import kotlin.math.sqrt
 
+class PointCircularBuffer(val capacity: Int) {
+    private val buffer = arrayOfNulls<Point>(capacity)
+    private var head = 0
+    private var tail = 0
+    private var _size = 0
+
+    val size: Int get() = _size
+
+    @Synchronized
+    fun add(point: Point) {
+        if (_size == capacity) {
+            tail = (tail + 1) % capacity
+        } else {
+            _size++
+        }
+        buffer[head] = point
+        head = (head + 1) % capacity
+    }
+
+    @Synchronized
+    fun toList(): List<Point> {
+        val list = ArrayList<Point>(_size)
+        for (i in 0 until _size) {
+            val idx = (tail + i) % capacity
+            buffer[idx]?.let { list.add(it) }
+        }
+        return list
+    }
+
+    @Synchronized
+    fun lastOrNull(): Point? {
+        if (_size == 0) return null
+        val lastIdx = (head - 1 + capacity) % capacity
+        return buffer[lastIdx]
+    }
+
+    @Synchronized
+    fun getFromEnd(offset: Int): Point? {
+        if (offset >= _size) return null
+        val idx = (head - 1 - offset + capacity) % capacity
+        return buffer[idx]
+    }
+
+    @Synchronized
+    fun clear() {
+        head = 0
+        tail = 0
+        _size = 0
+    }
+}
+
 class SessionRecorder(private val baseDir: File? = null) {
 
-    private val points = mutableListOf<Point>()
+    private val points = PointCircularBuffer(10000)
     private var startTime: Long = 0
     private var totalDistance: Float = 0f
 
@@ -29,11 +80,11 @@ class SessionRecorder(private val baseDir: File? = null) {
         totalDistance = 0f
     }
 
-        fun record(x: Float, y: Float, z: Float, tNanos: Long, stability: Float, type: PointType = PointType.NORMAL) {
+    fun record(x: Float, y: Float, z: Float, tNanos: Long, stability: Float, type: PointType = PointType.NORMAL) {
         val p = Point(x, y, z, tNanos, stability, type)
         synchronized(this) {
-            if (points.isNotEmpty()) {
-                val last = points.last()
+            val last = points.lastOrNull()
+            if (last != null) {
                 val dx = x - last.x
                 val dy = y - last.y
                 val dz = z - last.z
@@ -45,11 +96,6 @@ class SessionRecorder(private val baseDir: File? = null) {
                 totalDistance += dist
             }
             points.add(p)
-            
-            // 🛑 Safety Cap: Prevent infinite memory growth
-            if (points.size > 10000) {
-                points.removeAt(0)
-            }
         }
     }
 
@@ -62,7 +108,9 @@ class SessionRecorder(private val baseDir: File? = null) {
     @Synchronized
     fun getVelocity(): Float {
         val lastTwo = synchronized(this) {
-            if (points.size < 2) null else (points[points.size - 2] to points.last())
+            val last = points.getFromEnd(0)
+            val prev = points.getFromEnd(1)
+            if (last != null && prev != null) (prev to last) else null
         } ?: return 0f
         
         val prev = lastTwo.first
@@ -80,9 +128,10 @@ class SessionRecorder(private val baseDir: File? = null) {
 
     @Synchronized
     fun offsetPoints(dx: Float, dy: Float, dz: Float) {
-        for (i in points.indices) {
-            val p = points[i]
-            points[i] = Point(p.x + dx, p.y + dy, p.z + dz, p.tNanos, p.stability, p.type)
+        val snapshot = points.toList()
+        points.clear()
+        for (p in snapshot) {
+            points.add(Point(p.x + dx, p.y + dy, p.z + dz, p.tNanos, p.stability, p.type))
         }
     }
 
@@ -237,7 +286,7 @@ class SessionRecorder(private val baseDir: File? = null) {
 
     @Synchronized
     fun exportCsv(file: File) {
-        exportCsvInternal(file, points)
+        exportCsvInternal(file, points.toList())
     }
 
     private fun exportCsvInternal(file: File, pointsList: List<Point>) {

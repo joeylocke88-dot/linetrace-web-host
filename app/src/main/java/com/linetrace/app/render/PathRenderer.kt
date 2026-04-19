@@ -11,6 +11,7 @@ class PathRenderer {
     private var program = 0
     private var positionHandle = -1
     private var mvpHandle = -1
+    private var offsetHandle = -1
     private var colorHandle = -1
     private var depthBiasHandle = -1
     private var screenSizeHandle = -1
@@ -22,6 +23,7 @@ class PathRenderer {
     private var ribbonPositionHandle = -1
     private var ribbonStabilityHandle = -1
     private var ribbonMvpHandle = -1
+    private var ribbonOffsetHandle = -1
     private var ribbonColorHandle = -1
     private var ribbonDepthBiasHandle = -1
     private var ribbonCamDepthHandle = -1
@@ -35,6 +37,7 @@ class PathRenderer {
         program = GLUtils.buildProgram(ShaderSource.VERTEX_SHADER, ShaderSource.FRAGMENT_SHADER)
         positionHandle = GLES30.glGetAttribLocation(program, "aPosition")
         mvpHandle = GLES30.glGetUniformLocation(program, "uMvpMatrix")
+        offsetHandle = GLES30.glGetUniformLocation(program, "uOffset")
         colorHandle = GLES30.glGetUniformLocation(program, "uColor")
         depthBiasHandle = GLES30.glGetUniformLocation(program, "uDepthBias")
         screenSizeHandle = GLES30.glGetUniformLocation(program, "uScreenSize")
@@ -46,6 +49,7 @@ class PathRenderer {
         ribbonPositionHandle = GLES30.glGetAttribLocation(ribbonProgram, "aPosition")
         ribbonStabilityHandle = GLES30.glGetAttribLocation(ribbonProgram, "aStability")
         ribbonMvpHandle = GLES30.glGetUniformLocation(ribbonProgram, "uMvpMatrix")
+        ribbonOffsetHandle = GLES30.glGetUniformLocation(ribbonProgram, "uOffset")
         ribbonColorHandle = GLES30.glGetUniformLocation(ribbonProgram, "uColor")
         ribbonDepthBiasHandle = GLES30.glGetUniformLocation(ribbonProgram, "uDepthBias")
         ribbonCamDepthHandle = GLES30.glGetUniformLocation(ribbonProgram, "uCameraDepth")
@@ -84,14 +88,18 @@ class PathRenderer {
         GLES30.glLineWidth(2.0f)
         GLES30.glUniform4f(colorHandle, 0.0f, 1.0f, 0.5f, 0.6f)
         GLES30.glUniform1f(depthBiasHandle, -0.001f)
+        GLES30.glUniform3f(offsetHandle, 0f, 0f, 0f) 
         drawChunkedPathInternal(ghostPathChunks, camPos, positionHandle, radiusMeters = 20.0f)
 
         // Live Path
         GLES30.glLineWidth(3.0f) 
         GLES30.glUniform4f(colorHandle, 0.4f, 0.8f, 1.0f, 1.0f)
         GLES30.glUniform1f(depthBiasHandle, -0.002f)
+        // Standard chunk drawing uses world space
+        GLES30.glUniform3f(offsetHandle, 0f, 0f, 0f)
         drawChunkedPathInternal(livePathChunks, camPos, positionHandle, radiusMeters = 15.0f)
-        livePath.draw(positionHandle)
+        // Live path uses Epoch Offset
+        livePath.draw(positionHandle, offsetHandle)
 
         // 2. Wall Render Pass (Ribbons)
         GLES30.glUseProgram(ribbonProgram)
@@ -107,11 +115,13 @@ class PathRenderer {
         GLES30.glUniform1i(ribbonCamDepthHandle, 1)
 
         GLES30.glUniform4f(ribbonColorHandle, 0.0f, 1.0f, 0.5f, 0.3f)
+        GLES30.glUniform3f(ribbonOffsetHandle, 0f, 0f, 0f)
         drawChunkedPathInternal(ghostPathChunks, camPos, ribbonPositionHandle, ribbonStabilityHandle, true, 20.0f)
 
         GLES30.glUniform4f(ribbonColorHandle, 0.4f, 0.8f, 1.0f, 0.6f)
+        GLES30.glUniform3f(ribbonOffsetHandle, 0f, 0f, 0f)
         drawChunkedPathInternal(livePathChunks, camPos, ribbonPositionHandle, ribbonStabilityHandle, true, 15.0f)
-        livePath.drawRibbon(ribbonPositionHandle, ribbonStabilityHandle)
+        livePath.drawRibbon(ribbonPositionHandle, ribbonStabilityHandle, ribbonOffsetHandle)
     }
 
     private fun drawChunkedPathInternal(
@@ -134,9 +144,9 @@ class PathRenderer {
                         val key = ((cx + dx).toLong() shl 42) or (((cy + dy).toLong() and 0x1FFFFF) shl 21) or ((cz + dz).toLong() and 0x1FFFFF)
                         chunksMap[key]?.let { chunk ->
                             if (isRibbon) {
-                                if (stabHandle != -1) chunk.drawRibbon(posHandle, stabHandle)
+                                if (stabHandle != -1) chunk.drawRibbon(posHandle, stabHandle, -1) // Chunks are pre-shifted or in world space
                             } else {
-                                chunk.draw(posHandle)
+                                chunk.draw(posHandle, -1)
                             }
                         }
                     }
@@ -172,6 +182,7 @@ class PathRenderer {
         GLES30.glUseProgram(program)
         GLES30.glUniformMatrix4fv(mvpHandle, 1, false, vpMatrix, 0)
         GLES30.glUniform4f(colorHandle, 1.0f, 0.2f, 0.2f, 1.0f)
+        GLES30.glUniform3f(offsetHandle, 0f, 0f, 0f)
         val poiBuffer = ByteBuffer.allocateDirect(nearbyPois.size * 3 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         for (poi in nearbyPois) {
             poiBuffer.put(poi.x); poiBuffer.put(poi.y); poiBuffer.put(poi.z)

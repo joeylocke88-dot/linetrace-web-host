@@ -6,6 +6,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.HandlerThread
 import java.util.concurrent.atomic.AtomicReference
 
 data class MotionSample(
@@ -24,6 +26,10 @@ class MotionTracker(val context: Context) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         ?: throw IllegalStateException("SensorManager unavailable")
+
+    // Dedicated thread for high-frequency sensor processing
+    private val sensorThread = HandlerThread("MotionTrackerThread").apply { start() }
+    private val sensorHandler = Handler(sensorThread.looper)
 
     private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         ?: throw IllegalStateException("Accelerometer not available")
@@ -48,6 +54,7 @@ class MotionTracker(val context: Context) : SensorEventListener {
 
     private var registered = false
     private var lastAccelTimestamp = 0L
+    private var lastProcessedTimestamp = 0L
 
     private var currentSamplingRate = SensorManager.SENSOR_DELAY_FASTEST
     private var isHighPowerMode = true
@@ -76,15 +83,15 @@ class MotionTracker(val context: Context) : SensorEventListener {
         if (registered) return
         // Upgrading to SENSOR_DELAY_FASTEST (~200Hz+) for Tactical/High-Precision
         // Now authorized via HIGH_SAMPLING_RATE_SENSORS permission
-        sensorManager.registerListener(this, accelerometer, currentSamplingRate)
+        sensorManager.registerListener(this, accelerometer, currentSamplingRate, sensorHandler)
         gyroscope?.let {
-            sensorManager.registerListener(this, it, currentSamplingRate)
+            sensorManager.registerListener(this, it, currentSamplingRate, sensorHandler)
         }
         rotationVector?.let {
-            sensorManager.registerListener(this, it, currentSamplingRate)
+            sensorManager.registerListener(this, it, currentSamplingRate, sensorHandler)
         }
         lightSensor?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
         }
         registered = true
     }
@@ -94,6 +101,11 @@ class MotionTracker(val context: Context) : SensorEventListener {
         sensorManager.unregisterListener(this)
         registered = false
         imuBridge = null // Clear bridge reference on stop to prevent ghost transmissions
+    }
+
+    fun shutdown() {
+        stop()
+        sensorThread.quitSafely()
     }
 
     fun snapshot(): MotionSample = latest.get()

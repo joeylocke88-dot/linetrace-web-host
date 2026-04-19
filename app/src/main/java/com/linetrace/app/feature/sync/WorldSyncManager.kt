@@ -212,8 +212,7 @@ class WorldSyncManager(
                 val remaining = data.remaining()
                 
                 if (remaining == 16) {
-                    // Path Point: x, y, z, stability
-                    // Protocol Alignment: These are already negated by the sender (ImuNetworkBridge)
+                    // Path Point: x, y, z, stability (16 bytes binary)
                     val x = data.float
                     val y = data.float
                     val z = data.float
@@ -224,7 +223,7 @@ class WorldSyncManager(
                     Log.d("WorldSync", "Received world delta ($remaining bytes) from ${delta.senderId}")
                     streamer.addSurfelsAsync(delta.surfelData)
                 } else {
-                    Log.w("WorldSync", "Received malformed delta ($remaining bytes) - Discarding")
+                    Log.w("WorldSync", "Received unknown binary delta ($remaining bytes) - Discarding")
                 }
             }
         }

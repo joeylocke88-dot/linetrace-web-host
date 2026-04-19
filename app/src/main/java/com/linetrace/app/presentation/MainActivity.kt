@@ -786,7 +786,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         
         if (isInitialized) {
             // 1. Stop high-level systems
-            tracker.stop()
+            tracker.shutdown()
             renderer.onPause() // Ensure GL state is stable
             
             // 2. Shut down background threads/executors
