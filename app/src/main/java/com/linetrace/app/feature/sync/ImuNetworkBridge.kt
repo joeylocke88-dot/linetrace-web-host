@@ -11,6 +11,7 @@ import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import org.json.JSONArray
 import org.json.JSONObject
+import net.jpountz.lz4.LZ4Factory
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -82,6 +83,9 @@ class ImuNetworkBridge(
     private val pcTransferArray = ByteArray(65536 * 16 + 9)
     private val pcTransferBuffer = ByteBuffer.wrap(pcTransferArray).order(ByteOrder.LITTLE_ENDIAN)
 
+    private val compressArray = ByteArray(65536 * 16 + 9)
+    private val lz4Compressor = LZ4Factory.fastestInstance().fastCompressor()
+
     private val poseTransferArray = ByteArray(1 + 8 + 64) 
     private val poseTransferBuffer = ByteBuffer.wrap(poseTransferArray).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -89,6 +93,7 @@ class ImuNetworkBridge(
         private const val TYPE_POINT_CLOUD: Byte = 0x01
         private const val TYPE_WORLD_DELTA: Byte = 0x02
         private const val TYPE_CAMERA_POSE: Byte = 0x03
+        private const val TYPE_COMPRESSED_PC: Byte = 0x04
     }
 
     fun sendPointCloud(pcData: FloatBuffer) {
@@ -100,18 +105,26 @@ class ImuNetworkBridge(
 
         val byteSize = remaining * 4
         
-        pcTransferBuffer.clear()
-        pcTransferBuffer.put(TYPE_POINT_CLOUD)
-        pcTransferBuffer.putLong(System.currentTimeMillis())
-        
-        pcTransferBuffer.asFloatBuffer().put(pcData.duplicate())
-        
+        // Use Compressed Path (LZ4)
         try {
-            pcTransferBuffer.position(0)
-            pcTransferBuffer.limit(1 + 8 + byteSize)
-            currentClient.send(pcTransferBuffer)
+            val sourceBuffer = ByteBuffer.allocate(byteSize).order(ByteOrder.LITTLE_ENDIAN)
+            sourceBuffer.asFloatBuffer().put(pcData.duplicate())
+            val sourceArray = sourceBuffer.array()
+            
+            val maxCompressedLength = lz4Compressor.maxCompressedLength(byteSize)
+            val compressed = ByteArray(maxCompressedLength)
+            val compressedLength = lz4Compressor.compress(sourceArray, 0, byteSize, compressed, 0, maxCompressedLength)
+            
+            val outBuffer = ByteBuffer.allocate(1 + 8 + 4 + compressedLength).order(ByteOrder.LITTLE_ENDIAN)
+            outBuffer.put(TYPE_COMPRESSED_PC)
+            outBuffer.putLong(System.currentTimeMillis())
+            outBuffer.putInt(byteSize) // Original size for decompressor
+            outBuffer.put(compressed, 0, compressedLength)
+            outBuffer.flip()
+            
+            currentClient.send(outBuffer)
         } catch (e: Exception) {
-            Log.e("ImuNetworkBridge", "Failed to send binary point cloud", e)
+            Log.e("ImuNetworkBridge", "Failed to send compressed point cloud", e)
         }
     }
 

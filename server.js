@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
+const lz4 = require("lz4js");
 const { Bonjour } = require("bonjour-service");
 
 const PORT = process.env.PORT || 10000;
@@ -75,7 +76,6 @@ function loadWorldState() {
   } catch (e) {
     console.error("Lazarus Map load failed:", e.message);
   }
-  // ... rest of function
 
   try {
     if (fs.existsSync(WORLD_FILE)) {
@@ -137,7 +137,7 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       try {
         const telemetry = JSON.parse(body);
-        console.log(`°ƒôê Telemetry from ${telemetry.senderId || 'unknown'}: ${telemetry.distance}m, ${telemetry.points} pts`);
+        console.log(`📊 Telemetry from ${telemetry.senderId || 'unknown'}: ${telemetry.distance}m, ${telemetry.points} pts`);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok" }));
       } catch (e) {
@@ -194,7 +194,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({
   server,
   clientTracking: true,
-  perMessageDeflate: false // Often causes issues on free-tier Render or mobile clients
+  perMessageDeflate: false
 });
 const rooms = new Map(); // roomName → Map<user, ws>
 
@@ -250,6 +250,53 @@ wss.on("connection", (ws, req) => {
   }
 
   ws.on("message", (raw) => {
+    // 🚀 Zero-Overhead Binary Path
+    if (Buffer.isBuffer(raw)) {
+        const type = raw.readInt8(0);
+        if (type === 0x02) { // TYPE_WORLD_DELTA
+            const timestamp = raw.readBigInt64LE(1);
+            const senderIdMSB = raw.readBigInt64LE(9);
+            const senderIdLSB = raw.readBigInt64LE(17);
+            const surfelData = raw.subarray(25);
+            
+            let newImportancePoints = 0;
+            for (let i = 0; i < surfelData.length; i += 64) {
+                if (i + 64 > surfelData.length) break;
+                if (decimator.processSurfel(surfelData, i)) {
+                    newImportancePoints++;
+                }
+            }
+            if (newImportancePoints > 0 && Math.random() < 0.01) {
+                console.log(`📈 Lazarus Map updated (Binary): +${newImportancePoints} points (Total: ${decimator.size})`);
+            }
+        } else if (type === 0x04) { // TYPE_COMPRESSED_PC
+            const timestamp = raw.readBigInt64LE(1);
+            const originalSize = raw.readInt32LE(9);
+            const compressed = raw.subarray(13);
+            try {
+                const decompressed = lz4.decompress(compressed);
+                if (Math.random() < 0.05) {
+                    console.log(`[${room}] Decompressed PC from ${user}: ${compressed.length} -> ${decompressed.length} bytes`);
+                }
+                // Forward as raw TYPE_POINT_CLOUD (0x01) to web clients for simplicity
+                const out = Buffer.alloc(1 + 8 + decompressed.length);
+                out.writeInt8(0x01, 0);
+                out.writeBigInt64LE(timestamp, 1);
+                Buffer.from(decompressed).copy(out, 9);
+                broadcast(room, out, ws);
+                return;
+            } catch (e) {
+                console.error("LZ4 Decompression failed:", e.message);
+            }
+        } else if (type === 0x01 || type === 0x03) {
+            // Forward PC and Camera Pose directly (Optimization path)
+            if (Math.random() < 0.05) console.log(`[${room}] Binary ${type === 0x01 ? 'PC' : 'Pose'} from ${user}`);
+        }
+        
+        broadcast(room, raw, ws);
+        return;
+    }
+
     let msg;
     try {
       msg = JSON.parse(raw);
@@ -261,13 +308,11 @@ wss.on("connection", (ws, req) => {
 
     // Verbose logging for debugging telemetry issues
     if (msg.type === "imu" || msg.type === "pose") {
-        // Log every 100th message or so to avoid flooding, or just log high level
         if (Math.random() < 0.01) console.log(`[${room}] Telemetry heartbeat from ${user}: ${msg.type}`);
     } else {
         console.log(`[${room}] Received ${msg.type} from ${user}`);
     }
 
-    // Preserve original fields if present (from Android Core State)
     msg.node = msg.node || user;
     msg.room = room;
     if (!msg.timestamp) msg.timestamp = Date.now();
@@ -301,23 +346,12 @@ wss.on("connection", (ws, req) => {
       return;
     }
 
-    // 2. Core State Forwarding (Enriched Cayley Graph Nodes)
-    // Matches: imu, path_point, pose, ar_vertical_plane, thermal_heartbeat, world_delta
-    if (msg.type === "compute_pc" && msg.data) {
-        // High-bandwidth point cloud for GPU Boost
-        if (Math.random() < 0.05) console.log(`[${room}] Received compute_pc (${msg.data.length} bytes) from ${user}`);
-    }
-
+    // 2. Remote Compute Tasks
     if (msg.type === "compute_task" && msg.taskId) {
         console.log(`[${room}] Remote Compute Task: ${msg.taskId} from ${user}`);
 
         if (msg.taskId === "pose_graph_solve" && msg.data) {
           const { nodes, factors, iterations } = msg.data;
-          // SERVER-SIDE POSE GRAPH OPTIMIZATION (Simplified PGO)
-          // In a production environment, we'd use G2O or Ceres here via a WASM module.
-          // For now, we perform a weighted SE(3) averaging similar to the Android CPU path,
-          // but with more iterations or higher precision if needed.
-
           const nodesList = nodes.nodes || [];
           const edgesList = factors.edges || [];
           const nodeMap = new Map();
@@ -329,8 +363,6 @@ wss.on("connection", (ws, req) => {
               const nodeB = nodeMap.get(edge.to);
               if (!nodeA || !nodeB) return;
 
-              // Simplified translation-only correction for the demo
-              // In reality, we'd do full 4x4 matrix multiplication
               const alpha = 0.3;
               for (let i = 12; i < 15; i++) {
                 const target = nodeA.pose[i] + edge.transform[i];
@@ -339,7 +371,6 @@ wss.on("connection", (ws, req) => {
             });
           }
 
-          // Return corrections
           const corrections = Array.from(nodeMap.values()).map(n => ({
             id: n.id,
             pose: n.pose
@@ -351,41 +382,30 @@ wss.on("connection", (ws, req) => {
             data: { corrections },
             timestamp: Date.now()
           }));
-        } else if (msg.taskId === "surfel_fusion" && msg.data) {
-          // SERVER-SIDE SURFEL FUSION (Demo Loopback)
-          // In a full implementation, we'd store the point cloud from compute_pc
-          // and merge it into the Lazarus Map here.
-          // For now, we just acknowledge receipt to verify the protocol.
-          ws.send(JSON.stringify({
-            type: "compute_ack",
-            taskId: msg.taskId,
-            timestamp: Date.now()
-          }));
         } else {
-          ws.send(JSON.stringify({
+            ws.send(JSON.stringify({
+                type: "compute_ack",
+                taskId: msg.taskId,
+                timestamp: Date.now()
+            }));
+        }
     }
 
+    // Legacy JSON World Delta support
     if (msg.type === "world_delta" && msg.surfelData) {
-        // Handle both binary (Buffer/Uint8Array) and Base64 string from WebSocket
         const buffer = typeof msg.surfelData === 'string'
             ? Buffer.from(msg.surfelData, 'base64')
             : Buffer.from(msg.surfelData);
 
         let newImportancePoints = 0;
-
         for (let i = 0; i < buffer.length; i += 64) {
             if (i + 64 > buffer.length) break;
             if (decimator.processSurfel(buffer, i)) {
                 newImportancePoints++;
             }
         }
-
         if (newImportancePoints > 0) {
-            // Re-encode to ensure the broadcast uses the same format (base64)
             msg.surfelData = buffer.toString('base64');
-            if (Math.random() < 0.01) {
-                console.log(`📈 Lazarus Map updated: +${newImportancePoints} points (Total: ${decimator.size})`);
-            }
         }
     }
 
@@ -408,7 +428,7 @@ function broadcast(room, msg, skipWs = null) {
   const clients = rooms.get(room);
   if (!clients) return;
 
-  const payload = JSON.stringify(msg);
+  const payload = Buffer.isBuffer(msg) ? msg : JSON.stringify(msg);
   for (const client of clients.values()) {
     if (client !== skipWs && client.readyState === WebSocket.OPEN) {
       client.send(payload);

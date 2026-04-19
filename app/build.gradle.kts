@@ -78,6 +78,7 @@ dependencies {
     implementation(libs.play.services.nearby)
     implementation(libs.okhttp)
     implementation(libs.java.websocket.client)
+    implementation(libs.lz4.java)
     testImplementation(libs.junit)
     testImplementation(libs.mockito.core)
     testImplementation(libs.mockito.kotlin)

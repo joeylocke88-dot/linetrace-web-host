@@ -11,39 +11,43 @@
     body {
       margin: 0;
       overflow: hidden;
-      background: #000;
-      font-family: sans-serif;
+      background: #050F19; /* deep_navy */
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #00E5FF; /* neon_cyan */
     }
 
     #ui {
       position: absolute;
       top: 10px;
       left: 10px;
-      color: white;
       z-index: 100;
-      background: rgba(0,0,0,0.6);
-      padding: 12px;
-      border-radius: 8px;
+      background: rgba(5, 15, 25, 0.85); /* deep_navy with alpha */
+      padding: 15px;
+      border: 1px solid #00E5FF; /* neon_cyan border */
+      border-radius: 4px;
+      box-shadow: 0 0 15px rgba(0, 229, 255, 0.2);
     }
 
     #thermal-ui {
       margin-top: 10px;
       padding-top: 10px;
-      border-top: 1px solid rgba(255,255,255,0.2);
+      border-top: 1px solid rgba(0, 229, 255, 0.3);
       font-size: 13px;
     }
 
-    .thermal-nominal { color: #00ff88; }
-    .thermal-hot { color: #ffcc00; font-weight: bold; }
-    .thermal-critical { color: #ff4444; font-weight: bold; text-decoration: underline; }
+    .thermal-nominal { color: #00E676; } /* tactical_green */
+    .thermal-hot { color: #FFEA00; font-weight: bold; } /* tactical_yellow */
+    .thermal-critical { color: #FF1744; font-weight: bold; text-decoration: underline; } /* tactical_red */
 
     #status {
       position: absolute;
-      bottom: 10px;
-      left: 10px;
-      color: #00ff88;
+      bottom: 15px;
+      left: 15px;
+      color: #00E5FF;
       z-index: 100;
       font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .legend {
@@ -67,15 +71,35 @@
       flex-shrink: 0;
     }
 
-    .legend .axis-x { background: #ff0000; }
-    .legend .axis-y { background: #00ff00; }
-    .legend .axis-z { background: #0000ff; }
-    .legend .plane { background: rgba(0, 136, 255, 0.75); }
-    .legend .pose { background: #ff6600; }
-    .legend .surfel { background: #ffffff; border: 1px solid #444; }
+    .legend .axis-x { background: #FF1744; }
+    .legend .axis-y { background: #00E676; }
+    .legend .axis-z { background: #00E5FF; }
+    .legend .plane { background: rgba(0, 229, 255, 0.6); }
+    .legend .pose { background: #FF9800; }
+    .legend .surfel { background: #FFFFFF; border: 1px solid #00E5FF; }
 
-    input, button {
-      margin: 4px 0;
+    input {
+      background: #050F19;
+      border: 1px solid #00E5FF;
+      color: #00E5FF;
+      padding: 4px 8px;
+      margin-bottom: 8px;
+    }
+
+    button {
+      background: transparent;
+      border: 1px solid #00E5FF;
+      color: #00E5FF;
+      padding: 6px 12px;
+      cursor: pointer;
+      text-transform: uppercase;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: rgba(0, 229, 255, 0.1);
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
     }
   </style>
 </head>
@@ -215,6 +239,7 @@
     ws = new WebSocket(
       `${protocol}://${host}/?room=${currentRoom}&user=web_${Math.random().toString(36).slice(2)}`
     );
+    ws.binaryType = 'arraybuffer';
     ws.manualClose = false;
 
     ws.onopen = () => {
@@ -222,6 +247,12 @@
     };
 
     ws.onmessage = (e) => {
+      // 🚀 Zero-Overhead Binary Path
+      if (e.data instanceof ArrayBuffer) {
+          handleBinaryMessage(e.data);
+          return;
+      }
+
       try {
         const msg = JSON.parse(e.data);
         console.log(`📥 [${msg.type || 'unknown'}]`, msg);
@@ -241,7 +272,6 @@
         if (msg.type === 'imu') handlePose(msg); // Treat IMU like a pose for visualizer heartbeats
         if (msg.type === 'poi') handlePoi(msg);
         if (msg.type === 'ar_anchor') {
-           // Direct mapping for ar_anchor protocol
            if (msg.anchor && worldRoot) {
                worldRoot.position.set(msg.anchor.x || 0, msg.anchor.y || 0, msg.anchor.z || 0);
            }
@@ -262,17 +292,39 @@
 
     ws.onclose = () => {
       log('WebSocket disconnected');
-      // Auto-reconnect with exponential backoff if possible, or simple 3s
       if (!ws.manualClose) {
         setTimeout(joinRoom, 3000);
       }
     };
   }
 
+  function handleBinaryMessage(buffer) {
+      const dataView = new DataView(buffer);
+      const type = dataView.getInt8(0);
+      
+      if (type === 0x02) { // TYPE_WORLD_DELTA
+          // Format: [Type:1][Timestamp:8][SenderMSB:8][SenderLSB:8][SurfelData:N]
+          const surfelData = buffer.slice(25);
+          handleWorldDelta({ surfelData });
+      } else if (type === 0x01) { // TYPE_POINT_CLOUD (Raw)
+          const points = new Float32Array(buffer, 9);
+          handleRawPointCloud(points);
+      } else if (type === 0x03) { // TYPE_CAMERA_POSE
+          // Format: [Type:1][Timestamp:8][Matrix:64]
+          const matrix = new Float32Array(buffer, 9, 16);
+          handlePose({
+              user: 'remote_gpu',
+              state: {
+                  pos: { x: matrix[12], y: matrix[13], z: matrix[14] },
+                  rot: null 
+              }
+          });
+      }
+  }
+
   function resetWorld() {
     log("World Reset Received");
 
-    // Clear Paths
     paths.forEach(line => {
       worldRoot.remove(line.mesh);
       if (line.mesh.geometry) line.mesh.geometry.dispose();
@@ -280,19 +332,15 @@
     });
     paths.clear();
 
-    // Clear Poses
     poseMarkers.forEach(marker => worldRoot.remove(marker));
     poseMarkers.clear();
 
-    // Clear Planes
     planeMarkers.forEach(plane => worldRoot.remove(plane));
     planeMarkers.clear();
 
-    // Clear POIs
     poiMarkers.forEach(poi => worldRoot.remove(poi));
     poiMarkers.clear();
 
-    // Clear Surfels
     if (surfelMesh) {
       worldRoot.remove(surfelMesh);
       if (surfelMesh.geometry) surfelMesh.geometry.dispose();
@@ -301,7 +349,6 @@
       surfelPoints = 0;
     }
 
-    // Reset Anchor
     if (worldRoot) worldRoot.position.set(0, 0, 0);
   }
 
@@ -310,26 +357,23 @@
   // =========================
 
   function handlePathPoint(msg) {
-    let line = paths.get(msg.user || msg.node);
+    let line = paths.get(msg.user);
 
-    // Create new user path if needed
     if (!line) {
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array(MAX_POINTS * 3);
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const material = new THREE.LineBasicMaterial({ color: 0x00ff88 });
+      const material = new THREE.LineBasicMaterial({ color: 0x00E5FF });
       const mesh = new THREE.Line(geometry, material);
       line = { mesh, index: 0 };
       worldRoot.add(mesh);
-      paths.set(msg.user || msg.node, line);
+      paths.set(msg.user, line);
     }
 
     const obj = line;
     const array = obj.mesh.geometry.attributes.position.array;
     const i = obj.index * 3;
-
-    // Use state.pos (Cayley Protocol) or flat x,y,z (Legacy)
-    const p = msg.state?.pos || msg.point || { x: msg.x || 0, y: msg.y || 0, z: msg.z || 0 };
+    const p = msg.point || { x: msg.x || 0, y: msg.y || 0, z: msg.z || 0 };
 
     array[i] = p.x;
     array[i + 1] = p.y;
@@ -355,6 +399,7 @@
 
   function handlePose(msg) {
     if (!msg.state || !msg.state.pos) return;
+
     const user = msg.user || msg.node || 'device_ar';
     let marker = poseMarkers.get(user);
 
@@ -362,9 +407,11 @@
       marker = new THREE.Group();
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(0.08, 16, 16),
-        new THREE.MeshStandardMaterial({ color: 0xff6600 })
+        new THREE.MeshStandardMaterial({ color: 0xFF9800, emissive: 0xFF9800, emissiveIntensity: 0.5 })
       );
+      sphere.position.set(0, 0, 0);
       marker.add(sphere);
+
       const axisLength = 0.5;
       const createAxis = (color, dir) => {
         const material = new THREE.LineBasicMaterial({ color });
@@ -374,14 +421,21 @@
         ]);
         return new THREE.Line(geometry, material);
       };
-      marker.add(createAxis(0xff0000, { x: 1, y: 0, z: 0 }));
-      marker.add(createAxis(0x00ff00, { x: 0, y: 1, z: 0 }));
-      marker.add(createAxis(0x0000ff, { x: 0, y: 0, z: 1 }));
+
+      marker.add(createAxis(0xFF1744, { x: 1, y: 0, z: 0 })); // tactical_red
+      marker.add(createAxis(0x00E676, { x: 0, y: 1, z: 0 })); // tactical_green
+      marker.add(createAxis(0x00E5FF, { x: 0, y: 0, z: 1 })); // neon_cyan
+
       worldRoot.add(marker);
       poseMarkers.set(user, marker);
     }
 
-    marker.position.set(msg.state.pos.x || 0, msg.state.pos.y || 0, msg.state.pos.z || 0);
+    marker.position.set(
+      msg.state.pos.x || 0,
+      msg.state.pos.y || 0,
+      msg.state.pos.z || 0
+    );
+
     if (msg.state.rot) {
       marker.quaternion.set(
         msg.state.rot.x || 0,
@@ -392,14 +446,35 @@
     }
   }
 
+  function handleRawPointCloud(points) {
+    if (!surfelMesh) initSurfelMesh();
+    const posAttr = surfelMesh.geometry.attributes.position;
+    const colorAttr = surfelMesh.geometry.attributes.color;
+    const count = Math.floor(points.length / 4);
+
+    for (let i = 0; i < count; i++) {
+      const idx = (surfelPoints + i) % MAX_SURFELS;
+      posAttr.setXYZ(idx, points[i*4], points[i*4+1], points[i*4+2]);
+      // Use confidence (points[i*4+3]) to tint color
+      const conf = Math.min(Math.max(points[i*4+3], 0), 1);
+      colorAttr.setXYZ(idx, 0.0, 0.9, 1.0); // Tint towards neon_cyan
+    }
+    surfelPoints += count;
+    posAttr.needsUpdate = true;
+    colorAttr.needsUpdate = true;
+    surfelMesh.geometry.setDrawRange(0, Math.min(surfelPoints, MAX_SURFELS));
+  }
+
   function handleVerticalPlane(msg) {
     if (!msg.pos || typeof msg.height !== 'number') return;
+
     const id = msg.user || `${msg.type}_${msg.timestamp || Date.now()}`;
     let plane = planeMarkers.get(id);
+
     if (!plane) {
       const geometry = new THREE.PlaneGeometry(1, 1);
       const material = new THREE.MeshBasicMaterial({
-        color: 0x0088ff,
+        color: 0x00E5FF,
         transparent: true,
         opacity: Math.min(Math.max(msg.alpha ?? 0.25, 0.1), 0.85),
         side: THREE.DoubleSide,
@@ -409,6 +484,7 @@
       worldRoot.add(plane);
       planeMarkers.set(id, plane);
     }
+
     plane.position.set(msg.pos.x || 0, (msg.height / 2) || 0.5, msg.pos.z || 0);
     plane.scale.set(1, msg.height || 1, 1);
   }
@@ -417,20 +493,27 @@
     const x = msg.x != null ? msg.x : (msg.pos?.x || 0);
     const y = msg.y != null ? msg.y : (msg.pos?.y || 0);
     const z = msg.z != null ? msg.z : (msg.pos?.z || 0);
+
     const id = msg.id || `${x}_${y}_${z}`;
     if (poiMarkers.has(id)) return;
+
     const geometry = new THREE.SphereGeometry(0.12, 16, 16);
-    const material = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x444400 });
+    const material = new THREE.MeshStandardMaterial({ color: 0xFFEA00, emissive: 0xFFEA00, emissiveIntensity: 0.5 });
     const sphere = new THREE.Mesh(geometry, material);
     sphere.position.set(x, y, z);
     worldRoot.add(sphere);
     poiMarkers.set(id, sphere);
   }
 
+  // =========================
+  // SURFEL CLOUD HANDLING
+  // =========================
+
   function initSurfelMesh() {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_SURFELS * 3), 3));
+
     const material = new THREE.PointsMaterial({
       size: 0.04,
       vertexColors: true,
@@ -438,6 +521,7 @@
       opacity: 0.9,
       sizeAttenuation: true
     });
+
     surfelMesh = new THREE.Points(geometry, material);
     worldRoot.add(surfelMesh);
     log("Surfel cloud initialized");
@@ -446,36 +530,63 @@
   function handleWorldDelta(msg) {
     if (!msg.surfelData) return;
     if (!surfelMesh) initSurfelMesh();
+
     try {
-      const binaryString = atob(msg.surfelData);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-      const dataView = new DataView(bytes.buffer);
+      let bytes;
+      if (typeof msg.surfelData === 'string') {
+          const binaryString = atob(msg.surfelData);
+          bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+      } else {
+          bytes = new Uint8Array(msg.surfelData);
+      }
+
+      const dataView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const surfelCountInDelta = Math.floor(bytes.length / 64);
+
       const posAttr = surfelMesh.geometry.attributes.position;
       const colorAttr = surfelMesh.geometry.attributes.color;
+
       for (let i = 0; i < surfelCountInDelta; i++) {
         const offset = i * 64;
         const idx = (surfelPoints + i) % MAX_SURFELS;
+
         const x = dataView.getFloat32(offset + 0, true);
         const y = dataView.getFloat32(offset + 4, true);
         const z = dataView.getFloat32(offset + 8, true);
+
         const r = dataView.getFloat32(offset + 32, true);
         const g = dataView.getFloat32(offset + 36, true);
         const b = dataView.getFloat32(offset + 40, true);
+
         posAttr.setXYZ(idx, x, y, z);
         colorAttr.setXYZ(idx, r, g, b);
       }
+
       surfelPoints += surfelCountInDelta;
       posAttr.needsUpdate = true;
       colorAttr.needsUpdate = true;
       surfelMesh.geometry.setDrawRange(0, Math.min(surfelPoints, MAX_SURFELS));
-      if (Math.random() < 0.05) log(`Surfels: ${surfelPoints.toLocaleString()} (+${surfelCountInDelta})`);
-    } catch (e) { console.warn("Failed to decode surfel delta", e); }
+
+      if (Math.random() < 0.05) {
+        log(`Surfels: ${surfelPoints.toLocaleString()} (+${surfelCountInDelta})`);
+      }
+    } catch (e) {
+      console.warn("Failed to decode surfel delta", e);
+    }
   }
 
+  // =========================
+  // AR STARTUP
+  // =========================
+
   async function startAR() {
-    if (!navigator.xr) { log("WebXR not supported"); return; }
+    if (!navigator.xr) {
+      log("WebXR not supported");
+      return;
+    }
     try {
       const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ["local"],
@@ -483,10 +594,14 @@
       });
       renderer.xr.setSession(session);
       log("AR session active");
-    } catch (err) { log("AR failed: " + err.message); console.error(err); }
+    } catch (err) {
+      log("AR failed: " + err.message);
+      console.error(err);
+    }
   }
 
   window.onload = init;
 </script>
+
 </body>
 </html>
