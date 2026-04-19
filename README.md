@@ -1,6 +1,19 @@
 # LineTrace AR: High-Speed Tactical Navigation
 
 LineTrace AR is a high-performance Augmented Reality (AR) recording and navigation system built for high-speed maneuvers, low-light environments, and mission-critical reliability. It enables users to record, visualize, and follow complex paths with sub-meter precision even under extreme physical stress.
+Mission
+
+Make navigation invisible at any speed, so the person moving never has to choose between looking at a screen and looking at the world.
+
+
+What we're building
+
+LineTrace is an AR path recording and replay system that lets anyone capture a complex route and follow it back as a heads-up augmented reality overlay, at high speed, in low light, under extreme physical stress. Built for operators, racers, and anyone who can't afford to look down.
+
+
+Where we're headed
+
+A world where the path is always visible. Where a search and rescue team runs a night extraction on a route they walked once in daylight. Where a racer sees the perfect line burned into the track ahead of them. Where no one dies because they looked at a GPS screen instead of the road. LineTrace becomes the standard interface between a human in motion and the route they need to follow, everywhere the stakes are real.
 
 ## 🚀 Real-World Use Cases
 
