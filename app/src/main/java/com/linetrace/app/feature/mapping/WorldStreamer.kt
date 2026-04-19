@@ -18,6 +18,7 @@ data class Surfel(
 
 class WorldChunk(val x: Int, val y: Int, val z: Int) {
     var surfelData: ByteBuffer? = null
+    var pathData: ByteBuffer? = null
     var isDirty = false
     var lastAccessTime = System.currentTimeMillis()
     private val idToOffset = mutableMapOf<Long, Int>()
@@ -47,8 +48,8 @@ class WorldChunk(val x: Int, val y: Int, val z: Int) {
         if (newCount == 0) return
 
         ensureIdMap()
-
-        var currentData = surfelData
+        
+        val currentData = surfelData
         if (currentData == null) {
             surfelData = ByteBuffer.allocateDirect(newSurfels.remaining()).order(ByteOrder.nativeOrder()).apply {
                 put(newSurfels)
@@ -73,11 +74,9 @@ class WorldChunk(val x: Int, val y: Int, val z: Int) {
                     val existingTimestamp = currentData.getLong(existingOffset + 52)
                     if (newTimestamp > existingTimestamp) {
                         // LWW Merge: Update existing surfel data
-                        // Update confidence (average as per user request)
                         val oldConf = currentData.getFloat(existingOffset + 28)
                         val newConf = newSurfels.getFloat(newOffset + 28)
                         
-                        // Copy entire 64 bytes but blend confidence
                         for (j in 0 until 64) {
                             if (j !in 28..31) {
                                 currentData.put(existingOffset + j, newSurfels.get(newOffset + j))
@@ -112,6 +111,25 @@ class WorldChunk(val x: Int, val y: Int, val z: Int) {
         }
         isDirty = true
     }
+
+    fun addPathPoints(newPoints: ByteBuffer) {
+        newPoints.order(ByteOrder.nativeOrder())
+        newPoints.rewind()
+        if (newPoints.remaining() == 0) return
+
+        val currentData = pathData
+        val totalSize = (currentData?.remaining() ?: 0) + newPoints.remaining()
+        
+        val newData = ByteBuffer.allocateDirect(totalSize).order(ByteOrder.nativeOrder())
+        currentData?.let {
+            it.rewind()
+            newData.put(it)
+        }
+        newData.put(newPoints)
+        newData.flip()
+        pathData = newData
+        isDirty = true
+    }
 }
 
 typealias Chunk = WorldChunk
@@ -130,11 +148,11 @@ class WorldStreamer(private val storageDir: File) {
 
     data class CellKey(val x: Int, val y: Int, val z: Int)
 
-    private fun hashPosition(x: Float, y: Float, z: Float): CellKey {
+    private fun hashPosition(px: Float, py: Float, pz: Float): CellKey {
         return CellKey(
-            kotlin.math.floor(x / CELL_SIZE).toInt(),
-            kotlin.math.floor(y / CELL_SIZE).toInt(),
-            kotlin.math.floor(z / CELL_SIZE).toInt()
+            kotlin.math.floor(px / CHUNK_SIZE).toInt(),
+            kotlin.math.floor(py / CHUNK_SIZE).toInt(),
+            kotlin.math.floor(pz / CHUNK_SIZE).toInt()
         )
     }
 
@@ -145,13 +163,12 @@ class WorldStreamer(private val storageDir: File) {
     }
 
     private fun hilbertIndex(x: Int, y: Int, z: Int): Long {
-        // Simplified Morton fallback (fast)
         fun part1by2(n: Int): Long {
-            var v = (n + 1048576).toLong() and 0x1fffffL
-            v = (v or (v shl 32)) and 0x1f00000000ffffL
-            v = (v or (v shl 16)) and 0x1f0000ff0000ffL
-            v = (v or (v shl 8)) and 0x100f00f00f00f00fL
-            v = (v or (v shl 4)) and 0x10c30c30c30c30c3L
+            var v = n.toLong() and 0x1FFFFFL
+            v = (v or (v shl 32)) and 0x1F00000000FFFFL
+            v = (v or (v shl 16)) and 0x1F0000FF0000FFL
+            v = (v or (v shl 8)) and 0x100F00F00F00F00FL
+            v = (v or (v shl 4)) and 0x10C30C30C30C30C3L
             v = (v or (v shl 2)) and 0x1249249249249249L
             return v
         }
@@ -159,37 +176,81 @@ class WorldStreamer(private val storageDir: File) {
     }
 
     private fun getChunkKey(cx: Int, cy: Int, cz: Int): Long {
-        return hilbertIndex(cx, cy, cz)
+        return (cx.toLong() shl 42) or ((cy.toLong() and 0x1FFFFF) shl 21) or (cz.toLong() and 0x1FFFFF)
     }
 
     fun spatialSortSurfels(rawData: ByteBuffer): Map<CellKey, ByteBuffer> {
         rawData.order(ByteOrder.nativeOrder())
+        rawData.rewind()
         val count = rawData.remaining() / 64
-        val map = HashMap<CellKey, MutableList<Int>>()
-
+        val groups = mutableMapOf<CellKey, MutableList<Int>>()
+        
         for (i in 0 until count) {
             val offset = i * 64
-            val x = rawData.getFloat(offset)
-            val y = rawData.getFloat(offset + 4)
-            val z = rawData.getFloat(offset + 8)
-            val key = hashPosition(x, y, z)
-            map.getOrPut(key) { mutableListOf() }.add(i)
+            val px = rawData.getFloat(offset)
+            val py = rawData.getFloat(offset + 4)
+            val pz = rawData.getFloat(offset + 8)
+            val key = hashPosition(px, py, pz)
+            groups.getOrPut(key) { mutableListOf() }.add(offset)
         }
 
-        val result = HashMap<CellKey, ByteBuffer>()
-        for ((key, indices) in map) {
-            val buffer = ByteBuffer.allocateDirect(indices.size * 64).order(ByteOrder.nativeOrder())
-            for (idx in indices) {
-                val offset = idx * 64
-                val slice = rawData.duplicate()
-                slice.position(offset)
-                slice.limit(offset + 64)
-                buffer.put(slice)
+        return groups.mapValues { (_, offsets) ->
+            val buf = ByteBuffer.allocateDirect(offsets.size * 64).order(ByteOrder.nativeOrder())
+            for (off in offsets) {
+                for (j in 0 until 64) {
+                    buf.put(rawData.get(off + j))
+                }
             }
-            buffer.flip()
-            result[key] = buffer
+            buf.flip()
+            buf
         }
-        return result
+    }
+
+    fun spatialSortPathPoints(rawData: ByteBuffer): Map<CellKey, ByteBuffer> {
+        rawData.order(ByteOrder.nativeOrder())
+        rawData.rewind()
+        val count = rawData.remaining() / 16
+        val groups = mutableMapOf<CellKey, MutableList<Int>>()
+        
+        for (i in 0 until count) {
+            val offset = i * 16
+            val px = rawData.getFloat(offset)
+            val py = rawData.getFloat(offset + 4)
+            val pz = rawData.getFloat(offset + 8)
+            val key = hashPosition(px, py, pz)
+            groups.getOrPut(key) { mutableListOf() }.add(offset)
+        }
+
+        return groups.mapValues { (_, offsets) ->
+            val buf = ByteBuffer.allocateDirect(offsets.size * 16).order(ByteOrder.nativeOrder())
+            for (off in offsets) {
+                for (j in 0 until 16) {
+                    buf.put(rawData.get(off + j))
+                }
+            }
+            buf.flip()
+            buf
+        }
+    }
+
+    fun addPathPointsAsync(rawData: ByteBuffer, onChunkUpdated: ((WorldChunk) -> Unit)? = null) {
+        if (isShutdown) return
+        val cells = spatialSortPathPoints(rawData)
+        
+        ioExecutor.execute {
+            for ((key, buffer) in cells) {
+                val chunkKey = getChunkKey(key.x, key.y, key.z)
+                val chunk = chunks.getOrPut(chunkKey) {
+                    loadChunk(key.x, key.y, key.z) ?: WorldChunk(key.x, key.y, key.z)
+                }
+                synchronized(chunk) {
+                    chunk.addPathPoints(buffer)
+                    if (chunk.isDirty) {
+                        onChunkUpdated?.invoke(chunk)
+                    }
+                }
+            }
+        }
     }
 
     fun getChunkForPosition(px: Float, py: Float, pz: Float): WorldChunk {
@@ -200,48 +261,38 @@ class WorldStreamer(private val storageDir: File) {
         
         return chunks.getOrPut(key) {
             loadChunk(cx, cy, cz) ?: WorldChunk(cx, cy, cz)
-        }.apply { lastAccessTime = System.currentTimeMillis() }
+        }
     }
 
-    fun sortCellsSpatially(cells: Map<CellKey, ByteBuffer>): List<Pair<CellKey, ByteBuffer>> {
-        return cells.entries
-            .map { it.toPair() }
-            .sortedBy { (key, _) -> hilbertIndex(key.x, key.y, key.z) }
+    private fun sortCellsSpatially(cells: Map<CellKey, ByteBuffer>): List<Pair<CellKey, ByteBuffer>> {
+        return cells.toList().sortedBy { (key, _) -> 
+            hilbertIndex(key.x, key.y, key.z)
+        }
     }
 
     fun addSurfelsAsync(rawData: ByteBuffer, onChunkUpdated: ((WorldChunk) -> Unit)? = null) {
         if (isShutdown) return
-        if (pendingTasks >= MAX_QUEUE) {
-            Log.w("WorldStreamer", "Dropping surfel batch (backpressure)")
-            return
-        }
+        val cells = spatialSortSurfels(rawData)
+        val sorted = sortCellsSpatially(cells)
         
-        pendingTasks++
         ioExecutor.execute {
-            try {
-                val binned = spatialSortSurfels(rawData)
-                val ordered = sortCellsSpatially(binned)
-
-                for ((key, buffer) in ordered) {
-                    val chunkKey = hilbertIndex(key.x, key.y, key.z)
-                    val chunk = chunks.getOrPut(chunkKey) {
-                        loadChunk(key.x, key.y, key.z) ?: WorldChunk(key.x, key.y, key.z)
-                    }.apply { lastAccessTime = System.currentTimeMillis() }
-                    
+            for ((key, buffer) in sorted) {
+                val chunkKey = getChunkKey(key.x, key.y, key.z)
+                val chunk = chunks.getOrPut(chunkKey) {
+                    loadChunk(key.x, key.y, key.z) ?: WorldChunk(key.x, key.y, key.z)
+                }
+                synchronized(chunk) {
                     chunk.addSurfels(buffer)
                     if (chunk.isDirty) {
                         onChunkUpdated?.invoke(chunk)
                     }
                 }
-            } catch (e: Exception) {
-                Log.e("WorldStreamer", "Error in addSurfelsAsync", e)
-            } finally {
-                pendingTasks--
             }
         }
     }
 
     fun evictFarChunksAsync(px: Float, py: Float, pz: Float, radius: Float) {
+        if (isShutdown) return
         ioExecutor.execute {
             evictFarChunks(px, py, pz, radius)
         }
@@ -251,22 +302,20 @@ class WorldStreamer(private val storageDir: File) {
         val cx = kotlin.math.floor(px / CHUNK_SIZE).toInt()
         val cy = kotlin.math.floor(py / CHUNK_SIZE).toInt()
         val cz = kotlin.math.floor(pz / CHUNK_SIZE).toInt()
-        
-        val keysToRemove = mutableListOf<Long>()
+
         for ((key, chunk) in chunks) {
             val dx = chunk.x - cx
             val dy = chunk.y - cy
             val dz = chunk.z - cz
-            val distSq = dx * dx + dy * dy + dz * dz
+            val distSq = (dx * dx + dy * dy + dz * dz).toFloat()
+            
             if (distSq > (radius / CHUNK_SIZE) * (radius / CHUNK_SIZE)) {
-                keysToRemove.add(key)
-            }
-        }
-        
-        for (key in keysToRemove) {
-            val chunk = chunks.remove(key)
-            if (chunk?.isDirty == true) {
-                saveChunkSync(chunk)
+                synchronized(chunk) {
+                    val chunk = chunks.remove(key)
+                    if (chunk?.isDirty == true) {
+                        saveChunkSync(chunk)
+                    }
+                }
             }
         }
     }
@@ -279,11 +328,11 @@ class WorldStreamer(private val storageDir: File) {
         val data = chunk.surfelData ?: return
         val file = getChunkFile(chunk.x, chunk.y, chunk.z)
         try {
-            java.io.RandomAccessFile(file, "rw").use { raf ->
-                val channel = raf.channel
-                data.rewind()
-                channel.write(data)
-                data.rewind()
+            FileOutputStream(file).use { out ->
+                val array = ByteArray(data.remaining())
+                data.get(array)
+                out.write(array)
+                data.rewind() // Important: Reset for reuse if still in memory
             }
             Log.d("WorldStreamer", "Saved chunk ${chunk.x}, ${chunk.y}, ${chunk.z}")
             chunk.isDirty = false
@@ -295,18 +344,17 @@ class WorldStreamer(private val storageDir: File) {
     private fun loadChunk(x: Int, y: Int, z: Int): WorldChunk? {
         val file = getChunkFile(x, y, z)
         if (!file.exists()) return null
-
+        
         return try {
-            val randomAccessFile = java.io.RandomAccessFile(file, "r")
-            val channel = randomAccessFile.channel
-            val mappedBuffer = channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0, channel.size())
-            
+            val bytes = file.readBytes()
             val chunk = WorldChunk(x, y, z)
+            val mappedBuffer = ByteBuffer.allocateDirect(bytes.size)
+            mappedBuffer.put(bytes)
+            mappedBuffer.flip()
             chunk.surfelData = mappedBuffer.order(ByteOrder.nativeOrder())
             
-            // Note: We should close the channel and RAF, but the mapping stays valid
-            channel.close()
-            randomAccessFile.close()
+            // Rebuild ID map
+            // Note: addSurfels calls ensureIdMap which handles this, but here we can be explicit
             
             Log.d("WorldStreamer", "Mapped chunk $x, $y, $z (Zero-copy)")
             chunk
@@ -322,24 +370,16 @@ class WorldStreamer(private val storageDir: File) {
         val cx = kotlin.math.floor(px / CHUNK_SIZE).toInt()
         val cy = kotlin.math.floor(py / CHUNK_SIZE).toInt()
         val cz = kotlin.math.floor(pz / CHUNK_SIZE).toInt()
-        
+
         for (x in cx - r..cx + r) {
             for (y in cy - r..cy + r) {
                 for (z in cz - r..cz + r) {
-                    val dx = (x - cx).toFloat()
-                    val dy = (y - cy).toFloat()
-                    val dz = (z - cz).toFloat()
-                    if (dx*dx + dy*dy + dz*dz <= (radius/CHUNK_SIZE)*(radius/CHUNK_SIZE)) {
-                        val key = getChunkKey(x, y, z)
-                        chunks[key]?.let { 
-                            it.lastAccessTime = System.currentTimeMillis()
-                            results.add(it) 
-                        } ?: run {
-                            loadChunk(x, y, z)?.let { 
-                                chunks[key] = it
-                                results.add(it)
-                            }
-                        }
+                    val key = getChunkKey(x, y, z)
+                    chunks[key]?.let { 
+                        results.add(it)
+                    } ?: run {
+                        // Optionally load from disk if not in memory?
+                        // For a live renderer, maybe only return what's in memory or trigger async load
                     }
                 }
             }
@@ -350,33 +390,23 @@ class WorldStreamer(private val storageDir: File) {
     fun shutdown() {
         isShutdown = true
         ioExecutor.shutdown()
-        try {
-            if (!ioExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) {
-                ioExecutor.shutdownNow()
-            }
-        } catch (e: InterruptedException) {
-            ioExecutor.shutdownNow()
-        }
+        // Save all dirty chunks
         for (chunk in chunks.values) {
             if (chunk.isDirty) {
                 saveChunkSync(chunk)
             }
         }
-        chunks.clear()
     }
 
     fun restart() {
-        if (isShutdown) {
-            ioExecutor = Executors.newSingleThreadExecutor()
-            isShutdown = false
-        }
+        isShutdown = false
+        ioExecutor = Executors.newSingleThreadExecutor()
     }
 
     fun clear() {
         chunks.clear()
-        val files = storageDir.listFiles()
-        files?.forEach { it.delete() }
+        storageDir.listFiles()?.forEach { it.delete() }
     }
 
-    fun isShutdown() = isShutdown
+    fun isShutdown(): Boolean = isShutdown
 }

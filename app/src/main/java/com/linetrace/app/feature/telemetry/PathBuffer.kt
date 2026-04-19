@@ -49,6 +49,15 @@ class PathBuffer(private var capacityPoints: Int = 1024, val maxPoints: Int = 20
     private var alienZ: Float = 0f
     private var alienSeed: Int = -1
 
+    fun getVboId(): Int {
+        syncVboIfNeeded()
+        return vboId
+    }
+
+    fun syncVboExternal() {
+        syncVboIfNeeded()
+    }
+
     // --- Temporary Point for "Line follows device" ---
     private var tempX: Float = 0f
     private var tempY: Float = 0f

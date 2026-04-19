@@ -14,6 +14,7 @@ import com.linetrace.app.feature.sync.ImuNetworkBridge
 import com.linetrace.app.feature.telemetry.SessionRecorder
 import com.linetrace.app.feature.perception.DriftDampener
 import com.linetrace.app.feature.perception.ArImuFusionEngine
+import com.linetrace.app.analysis.Rectifier
 import com.linetrace.app.core.FusedState
 import com.linetrace.app.core.Point
 import com.linetrace.app.R
@@ -52,7 +53,10 @@ import androidx.core.content.ContextCompat
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
+import org.json.JSONObject
+import java.util.concurrent.Executors
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.Locale
 import kotlin.math.*
 
@@ -72,6 +76,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
     private lateinit var ghostPath: PathBuffer
     private lateinit var recorder: SessionRecorder
     private lateinit var renderer: LineRenderer
+    private lateinit var rectifier: Rectifier
     private lateinit var arController: ArCoreController
     private lateinit var imuBridge: ImuNetworkBridge
     private var serviceDiscovery: ServiceDiscovery? = null
@@ -152,8 +157,9 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
     private val dashboardTick = object : Runnable {
         override fun run() {
             if (!isInitialized) return
-            // "Lazarus" Protocol: Check if the renderer has stalled
-            renderer.checkHealth()
+            
+            // Full System Deep Scan & Repair
+            rectifier.rectifyAll()
 
             // Persistence: If the session failed to init (transient), retry here
             if (renderer.session == null && arSession == null) {
@@ -283,11 +289,37 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
             override fun onPoseReceived(timestamp: Long, pos: FloatArray, rot: FloatArray) {
                 ghostPath.addPoint(pos[0], pos[1], pos[2], 1.0f)
             }
+
+            override fun onComputeResult(taskId: String, data: JSONObject) {
+                when (taskId) {
+                    "pose_graph_solve" -> {
+                        val corrections = data.optJSONArray("corrections")
+                        if (corrections != null) {
+                            glView.queueEvent {
+                                renderer.applyRemoteCorrections(corrections)
+                                Log.d("MainActivity", "Applied remote pose graph correction")
+                            }
+                        }
+                    }
+                    "surfel_fusion" -> {
+                        val surfelDataBase64 = data.optString("surfelData")
+                        if (surfelDataBase64.isNotEmpty()) {
+                            val bytes = android.util.Base64.decode(surfelDataBase64, android.util.Base64.NO_WRAP)
+                            val buffer = ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                            glView.queueEvent {
+                                renderer.uploadRemoteSurfels(buffer)
+                            }
+                        }
+                    }
+                }
+            }
         }
         tracker.imuBridge = imuBridge
 
         renderer = LineRenderer(tracker, fusion, livePath, ghostPath, recorder, imuBridge)
         renderer.frameCallback = this
+        
+        rectifier = Rectifier(fusion, imuBridge, renderer)
 
         // 🔗 Connect Surfel Data to GPU Pipeline
         imuBridge.onDeltaReceived { delta ->
@@ -503,13 +535,13 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         }
 
         findViewById<ToggleButton>(R.id.btnLock).setOnCheckedChangeListener { _, isChecked ->
-            renderer.isDiagnosticOverlayEnabled = isChecked
+            renderer.isLineCrawlerEnabled = isChecked
             renderer.isHypervisor = isChecked // Link Lock to Hypervisor mode
-            val msg = if (isChecked) "Lock Enabled | Hypervisor Online" else "Lock Released | Hypervisor Offline"
+            val msg = if (isChecked) "LineCrawler Online | Hypervisor Online" else "LineCrawler Offline | Hypervisor Offline"
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
             
             // Log for verification
-            Log.d("LineTrace", "btnLock toggled: $isChecked, isHypervisor: ${renderer.isHypervisor}")
+            Log.d("LineTrace", "btnLock (LineCrawler) toggled: $isChecked, isHypervisor: ${renderer.isHypervisor}")
         }
 
         val settingsOverlay = findViewById<View>(R.id.settingsOverlay)
@@ -750,6 +782,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
 
     override fun onDestroy() {
         uiHandler.removeCallbacks(dashboardTick)
+        hapticExecutor.shutdown()
         
         if (isInitialized) {
             // 1. Stop high-level systems
@@ -824,6 +857,10 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
     override fun onFusedState(state: FusedState) {
         if (!isInitialized) return
         latestFusedState = state
+        
+        // Haptic feedback is now async
+        maybeHaptic(state.stability)
+        
         uiHandler.post {
             val tracking = renderer.isTracking
             val distance = recorder.getDistance()
@@ -832,14 +869,13 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
             val surfels = renderer.getSurfelCount()
             val depth = renderer.currentCenterDepth
             dashboard.updateState(state, tracking, distance, points, recording, false, surfels, depth)
-            maybeHaptic(state.stability)
         }
     }
 
-    override fun onCameraPoseAvailable(ready: Boolean) {
+    override fun onCameraPoseAvailable(success: Boolean) {
         if (!isInitialized) return
         uiHandler.post {
-            btnRecord.isEnabled = ready || renderer.tracingState != LineRenderer.TracingState.IDLE
+            btnRecord.isEnabled = success || renderer.tracingState != LineRenderer.TracingState.IDLE
         }
     }
 
@@ -941,19 +977,27 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         // Thermal Throttling: Prevent resurrection if device is overheating (> 45°C)
         // RapidPass: Bypass thermal safety in Hypervisor mode
         if (currentTemperature > 45f && !renderer.isHypervisor) {
-            Toast.makeText(this, getString(R.string.msg_alignment_blocked, currentTemperature), Toast.LENGTH_LONG).show()
+            uiHandler.post {
+                Toast.makeText(this, getString(R.string.msg_alignment_blocked, currentTemperature), Toast.LENGTH_LONG).show()
+            }
             return
         }
 
-        runOnUiThread {
+        uiHandler.post {
             Toast.makeText(this, getString(R.string.msg_alignment_init), Toast.LENGTH_SHORT).show()
             Toast.makeText(this, getString(R.string.msg_resurrection_try), Toast.LENGTH_SHORT).show()
-            try {
-                // Inform server of origin reset
-                if (::imuBridge.isInitialized) {
-                    imuBridge.sendAnchor(0f, 0f, 0f)
-                }
+            
+            // Offload network and session logic to background where possible
+            hapticExecutor.execute {
+                try {
+                    // Inform server of origin reset
+                    if (::imuBridge.isInitialized) {
+                        imuBridge.sendAnchor(0f, 0f, 0f)
+                    }
+                } catch (_: Exception) {}
+            }
 
+            try {
                 // Warm Resurrection
                 val session = arSession
                 if (session != null) {
@@ -962,7 +1006,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
                         renderer.onResume()
                         renderer.session = session
                         Toast.makeText(this, getString(R.string.msg_warm_success), Toast.LENGTH_SHORT).show()
-                        return@runOnUiThread
+                        return@post
                     } catch (_: Exception) {
                         // If resume fails, fall through to cold resurrection
                     }
@@ -987,16 +1031,20 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         }
     }
 
+    private val hapticExecutor = Executors.newSingleThreadExecutor()
+
     private fun maybeHaptic(stability: Float, force: Boolean = false) {
         if (!force && (stability >= 0.4f || !renderer.isRecording)) return
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createOneShot(10, 50))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(10)
-            }
-        } catch (_: Exception) {}
+        hapticExecutor.execute {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return@execute
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(10, 50))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(10)
+                }
+            } catch (_: Exception) {}
+        }
     }
 }

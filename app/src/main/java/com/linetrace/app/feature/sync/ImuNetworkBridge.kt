@@ -5,6 +5,8 @@ import com.linetrace.app.core.Point
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import org.json.JSONArray
@@ -12,6 +14,7 @@ import org.json.JSONObject
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.FloatBuffer
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -26,6 +29,7 @@ class ImuNetworkBridge(
 
     interface MessageListener {
         fun onPoseReceived(timestamp: Long, pos: FloatArray, rot: FloatArray)
+        fun onComputeResult(taskId: String, data: JSONObject)
     }
 
     var messageListener: MessageListener? = null
@@ -33,6 +37,11 @@ class ImuNetworkBridge(
     private var client: WebSocketClient? = null
     private var lastSendTime = 0L
     private val handler = Handler(Looper.getMainLooper())
+    private val networkExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ImuNetworkBridge-Worker").apply {
+            priority = Thread.MAX_PRIORITY
+        }
+    }
     private var isClosedIntentionally = false
     private var isConnecting = false
     private var currentServerUrl: String = ""
@@ -68,6 +77,61 @@ class ImuNetworkBridge(
     
     // Pre-allocated buffers for zero-allocation streaming
     private val surfelTransferArray = ByteArray(2000 * 64)
+    private val surfelTransferBuffer = ByteBuffer.wrap(surfelTransferArray).order(ByteOrder.LITTLE_ENDIAN)
+    
+    private val pcTransferArray = ByteArray(65536 * 16)
+    private val pcTransferBuffer = ByteBuffer.wrap(pcTransferArray).order(ByteOrder.LITTLE_ENDIAN)
+
+    fun sendPointCloud(pcData: FloatBuffer) {
+        val currentClient = client
+        if (currentClient == null || !currentClient.isOpen) return
+
+        val remaining = pcData.remaining()
+        if (remaining <= 0) return
+
+        val byteSize = remaining * 4
+        val json = JSONObject()
+        json.put("type", "compute_pc")
+        json.put("user", user)
+        json.put("timestamp", System.currentTimeMillis())
+
+        val bytes = if (byteSize <= pcTransferArray.size) {
+            pcTransferBuffer.clear()
+            val floatView = pcTransferBuffer.asFloatBuffer()
+            floatView.put(pcData.duplicate())
+            pcTransferArray
+        } else {
+            val b = ByteArray(byteSize)
+            val dup = pcData.duplicate()
+            ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().put(dup)
+            b
+        }
+
+        json.put("data", android.util.Base64.encodeToString(bytes, 0, byteSize, android.util.Base64.NO_WRAP))
+        try {
+            currentClient.send(json.toString())
+        } catch (e: Exception) {
+            Log.e("ImuNetworkBridge", "Failed to send point cloud", e)
+        }
+    }
+
+    fun sendComputeTask(taskId: String, taskData: JSONObject) {
+        val currentClient = client
+        if (currentClient == null || !currentClient.isOpen) return
+
+        val json = JSONObject()
+        json.put("type", "compute_task")
+        json.put("taskId", taskId)
+        json.put("user", user)
+        json.put("data", taskData)
+        json.put("timestamp", System.currentTimeMillis())
+
+        try {
+            currentClient.send(json.toString())
+        } catch (e: Exception) {
+            Log.e("ImuNetworkBridge", "Failed to send compute task", e)
+        }
+    }
 
     fun updateServerUrl(newUrl: String) {
         val cleanUrl = normalizeUrl(newUrl)
@@ -134,8 +198,8 @@ class ImuNetworkBridge(
             val uri = URI(uriStr)
             val newClient = object : WebSocketClient(uri) {
                 init {
-                    // Detect stale connections (Render often drops idle sockets)
-                    connectionLostTimeout = 20 
+                    // Timeout-Override-Success: Increased timeout and heartbeat for Render stability
+                    connectionLostTimeout = 60
                     
                     if (uriStr.startsWith("wss://", ignoreCase = true)) {
                         setupSsl()
@@ -181,11 +245,11 @@ class ImuNetworkBridge(
                                 val rotObj = state?.optJSONObject("rot")
                                 
                                 if (posObj != null) {
-                                    // Protocol Alignment: Negate received coordinates to convert back to local AR space
+                                    // Protocol Alignment: Use raw coordinates (Relative to Anchor)
                                     val pos = floatArrayOf(
-                                        -posObj.optDouble("x").toFloat(),
-                                        -posObj.optDouble("y").toFloat(),
-                                        -posObj.optDouble("z").toFloat()
+                                        posObj.optDouble("x").toFloat(),
+                                        posObj.optDouble("y").toFloat(),
+                                        posObj.optDouble("z").toFloat()
                                     )
                                     val rot = if (rotObj != null) {
                                         floatArrayOf(
@@ -214,6 +278,13 @@ class ImuNetworkBridge(
                                         timestamp = timestamp,
                                         surfelData = buffer
                                     ))
+                                }
+                            }
+                            "compute_result" -> {
+                                val taskId = json.optString("taskId")
+                                val resultData = json.optJSONObject("data")
+                                if (taskId.isNotEmpty() && resultData != null) {
+                                    messageListener?.onComputeResult(taskId, resultData)
                                 }
                             }
                         }
@@ -273,12 +344,15 @@ class ImuNetworkBridge(
         
         // Reuse pre-allocated array if possible to avoid GC churn
         val bytes = if (remaining <= surfelTransferArray.size) {
-            delta.surfelData.duplicate().get(surfelTransferArray, 0, remaining)
+            surfelTransferBuffer.clear()
+            val dup = delta.surfelData.duplicate()
+            surfelTransferBuffer.put(dup)
             surfelTransferArray
         } else {
             Log.w("ImuNetworkBridge", "Delta size $remaining exceeds reusable buffer, falling back to allocation")
             val b = ByteArray(remaining)
-            delta.surfelData.duplicate().get(b)
+            val dup = delta.surfelData.duplicate()
+            dup.get(b)
             b
         }
         
@@ -331,35 +405,34 @@ class ImuNetworkBridge(
         }
 
         // 1. STATE (Pos, Vel, Rot)
-        // Protocol Alignment: Negate coordinates for Web Visualizer centering
+        // Protocol Alignment: Send raw coordinates (Visualizer uses Position - Anchor)
         val stateObj = JSONObject()
-        pos?.let { stateObj.put("pos", JSONObject().apply { put("x", -it[0]); put("y", -it[1]); put("z", -it[2]) }) }
-        vel?.let { stateObj.put("vel", JSONObject().apply { put("x", -it[0]); put("y", -it[1]); put("z", -it[2]) }) }
+        pos?.let { stateObj.put("pos", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]) }) }
+        vel?.let { stateObj.put("vel", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]) }) }
         rot?.let { stateObj.put("rot", JSONObject().apply { put("x", it[0]); put("y", it[1]); put("z", it[2]); put("w", it[3]) }) }
         json.put("state", stateObj)
 
         // 2. BASIS
-        // Negate basis vectors to maintain coordinate system consistency
+        // Use raw basis vectors
         val basisObj = JSONObject()
-        basisObj.put("forward", JSONArray().apply { (forward ?: floatArrayOf(0f,0f,1f)).forEach { put(-it) } })
-        basisObj.put("right", JSONArray().apply { (right ?: floatArrayOf(1f,0f,0f)).forEach { put(-it) } })
-        basisObj.put("up", JSONArray().apply { (up ?: floatArrayOf(0f,1f,0f)).forEach { put(-it) } })
+        basisObj.put("forward", JSONArray().apply { (forward ?: floatArrayOf(0f,0f,1f)).forEach { put(it) } })
+        basisObj.put("right", JSONArray().apply { (right ?: floatArrayOf(1f,0f,0f)).forEach { put(it) } })
+        basisObj.put("up", JSONArray().apply { (up ?: floatArrayOf(0f,1f,0f)).forEach { put(it) } })
         json.put("basis", basisObj)
 
         // 3. EDGES (Cayley Temporal Continuity)
         val edgesArray = JSONArray()
         
         // Automatic Temporal Edge (Euclidean Delta)
-        // Deltas are negated (prev - pos) to match the negated world space
         if (type == "imu" && pos != null) {
             lastImuPos?.let { prev ->
                 val edgeObj = JSONObject()
                 edgeObj.put("to", "prev")
                 edgeObj.put("transform", "delta")
                 edgeObj.put("delta", JSONObject().apply {
-                    put("dx", prev[0] - pos[0])
-                    put("dy", prev[1] - pos[1])
-                    put("dz", prev[2] - pos[2])
+                    put("dx", pos[0] - prev[0])
+                    put("dy", pos[1] - prev[1])
+                    put("dz", pos[2] - prev[2])
                 })
                 edgesArray.put(edgeObj)
             }
@@ -370,9 +443,9 @@ class ImuNetworkBridge(
                 edgeObj.put("to", "prev_path")
                 edgeObj.put("transform", "euclidean_delta")
                 edgeObj.put("delta", JSONObject().apply {
-                    put("dx", prev[0] - pos[0])
-                    put("dy", prev[1] - pos[1])
-                    put("dz", prev[2] - pos[2])
+                    put("dx", pos[0] - prev[0])
+                    put("dy", pos[1] - prev[1])
+                    put("dz", pos[2] - prev[2])
                 })
                 edgesArray.put(edgeObj)
             }
@@ -380,15 +453,14 @@ class ImuNetworkBridge(
         }
 
         // Manual Graph Edges (from PoseGraph)
-        // Translation in SE3 matrix (indices 12, 13, 14) is negated
         edges?.forEach { edge ->
             val edgeObj = JSONObject()
             edgeObj.put("to", "node_${edge.to}")
             edgeObj.put("transform", "SE3")
             edgeObj.put("delta", JSONObject().apply {
-                put("dx", -edge.transform[12])
-                put("dy", -edge.transform[13])
-                put("dz", -edge.transform[14])
+                put("dx", edge.transform[12])
+                put("dy", edge.transform[13])
+                put("dz", edge.transform[14])
             })
             edgesArray.put(edgeObj)
         }
@@ -410,9 +482,9 @@ class ImuNetworkBridge(
         if (now - lastSendTime < 10) return // ~100Hz
         lastSendTime = now
 
-        // Linear acceleration is negated to match the negated coordinate system
+        // Use raw IMU data
         val data = JSONObject().apply {
-            put("ax", -ax); put("ay", -ay); put("az", -az)
+            put("ax", ax); put("ay", ay); put("az", az)
             put("gx", gx); put("gy", gy); put("gz", gz)
         }
         sendCoreState(type = "imu", rawData = data)
@@ -424,7 +496,7 @@ class ImuNetworkBridge(
                 val legacy = JSONObject().apply {
                     put("type", "imu")
                     put("data", JSONObject().apply {
-                        put("x", -ax); put("y", -ay); put("z", -az)
+                        put("x", ax); put("y", ay); put("z", az)
                     })
                 }
                 currentClient.send(legacy.toString())
@@ -469,9 +541,9 @@ class ImuNetworkBridge(
             if (currentClient != null && currentClient.isOpen) {
                 val legacy = JSONObject().apply {
                     put("type", "path_point")
-                    put("x", -x)
-                    put("y", -y)
-                    put("z", -z)
+                    put("x", x)
+                    put("y", y)
+                    put("z", z)
                     put("user", user)
                 }
                 currentClient.send(legacy.toString())
@@ -514,7 +586,7 @@ class ImuNetworkBridge(
      */
     fun sendVerticalPlane(x: Float, y: Float, z: Float, height: Float, alpha: Float) {
         val data = JSONObject().apply {
-            put("pos", JSONObject().apply { put("x", -x); put("y", -y); put("z", -z) })
+            put("pos", JSONObject().apply { put("x", x); put("y", y); put("z", z) })
             put("height", height)
             put("alpha", alpha)
         }
@@ -527,7 +599,7 @@ class ImuNetworkBridge(
                 val legacy = JSONObject().apply {
                     put("type", "ar_vertical_plane")
                     put("pos", JSONObject().apply {
-                        put("x", -x); put("y", -y); put("z", -z)
+                        put("x", x); put("y", y); put("z", z)
                     })
                     put("height", height)
                     put("alpha", alpha)
@@ -543,7 +615,7 @@ class ImuNetworkBridge(
      */
     fun sendPoi(x: Float, y: Float, z: Float) {
         val data = JSONObject().apply {
-            put("x", -x); put("y", -y); put("z", -z)
+            put("x", x); put("y", y); put("z", z)
             put("user", user)
         }
         sendCoreState(type = "poi", pos = floatArrayOf(x, y, z), rawData = data)
@@ -554,7 +626,7 @@ class ImuNetworkBridge(
             if (currentClient != null && currentClient.isOpen) {
                 val legacy = JSONObject().apply {
                     put("type", "poi")
-                    put("x", -x); put("y", -y); put("z", -z)
+                    put("x", x); put("y", y); put("z", z)
                     put("user", user)
                 }
                 currentClient.send(legacy.toString())
@@ -595,19 +667,21 @@ class ImuNetworkBridge(
     }
 
     private fun enqueueOrSend(message: String) {
-        val currentClient = client
-        if (currentClient != null && currentClient.isOpen) {
-            try {
-                currentClient.send(message)
-            } catch (e: Exception) {
-                Log.e("ImuNetworkBridge", "Failed to send: ${e.message}")
-                synchronized(pendingMessages) { pendingMessages.add(message) }
-            }
-        } else {
-            Log.d("ImuNetworkBridge", "Queueing message (Socket not open)")
-            synchronized(pendingMessages) {
-                if (pendingMessages.size > 100) pendingMessages.removeAt(0)
-                pendingMessages.add(message)
+        networkExecutor.execute {
+            val currentClient = client
+            if (currentClient != null && currentClient.isOpen) {
+                try {
+                    currentClient.send(message)
+                } catch (e: Exception) {
+                    Log.e("ImuNetworkBridge", "Failed to send: ${e.message}")
+                    synchronized(pendingMessages) { pendingMessages.add(message) }
+                }
+            } else {
+                Log.d("ImuNetworkBridge", "Queueing message (Socket not open)")
+                synchronized(pendingMessages) {
+                    if (pendingMessages.size > 100) pendingMessages.removeAt(0)
+                    pendingMessages.add(message)
+                }
             }
         }
     }

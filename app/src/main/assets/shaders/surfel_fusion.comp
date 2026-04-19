@@ -17,6 +17,10 @@ layout(std430, binding = 1) buffer Surfels {
     Surfel surfels[];
 };
 
+layout(std430, binding = 2) buffer Counter {
+    uint uActualCount;
+};
+
 uniform mat4 uCameraPose;
 uniform int uPointCount;
 uniform int uMaxSurfels;
@@ -45,13 +49,6 @@ void main() {
     // Transform to world space
     vec4 worldP = uCameraPose * vec4(localP.xyz, 1.0);
 
-    // Atomic append would be better, but for now we use the frame offset
-    uint writeIdx = uint(uCurrentSurfelCount) + id;
-    if (writeIdx >= uint(uMaxSurfels)) return;
-
-    Surfel s;
-    s.posRadius = vec4(worldP.xyz, 0.02); // 2cm radius
-
     // --- ADVANCED NORMAL ESTIMATION ---
     // Instead of just viewDir, we try to detect if we're on a vertical surface.
     // ARCore point clouds don't provide normals, but we can infer from motion.
@@ -62,11 +59,42 @@ void main() {
     // If the point is "in front" of us and we are moving, the normal should be roughly -viewDir.
     // However, to trigger the 'wall' logic in the shader (1.0 - abs(normal.y)),
     // we need normal.y to be close to 0 for vertical walls.
-
     vec3 estimatedNormal = viewDir;
     estimatedNormal.y *= 0.1; // Flatten the normal to force it into the horizontal plane
     estimatedNormal = normalize(estimatedNormal);
 
+    // --- SPATIAL DELTA MERGE ---
+    // If a new surfel is within 5mm of an existing one and shares the same covariance (rotation/scale), it is merged rather than added.
+    bool duplicate = false;
+    uint searchRange = 128u; // Extended search for high-density scan fusion
+    uint startSearch = (uCurrentSurfelCount > int(searchRange)) ? uint(uCurrentSurfelCount) - searchRange : 0u;
+
+    for(uint i = startSearch; i < uint(uCurrentSurfelCount); i++) {
+        vec3 diff = worldP.xyz - surfels[i].posRadius.xyz;
+        float distSq = dot(diff, diff);
+
+        if (distSq < 0.000025) { // 5mm threshold (0.005^2 = 0.000025)
+            // Covariance alignment check (Normal Similarity + Scale/Radius)
+            float normalSim = dot(estimatedNormal, surfels[i].normalConf.xyz);
+            float radiusSim = abs(0.02 - surfels[i].posRadius.w);
+
+            if (normalSim > 0.9 && radiusSim < 0.005) {
+                // Merge Logic: Update existing surfel metadata and skip allocation
+                surfels[i].timestamp = uTimestamp;
+                surfels[i].normalConf.w = min(1.0, surfels[i].normalConf.w + localP.w * 0.05); // Reinforce confidence
+                duplicate = true;
+                break;
+            }
+        }
+    }
+    if (duplicate) return;
+
+    // Atomic append for Spatial Delta integrity
+    uint writeIdx = atomicAdd(uActualCount, 1u);
+    if (writeIdx >= uint(uMaxSurfels)) return;
+
+    Surfel s;
+    s.posRadius = vec4(worldP.xyz, 0.02); // 2cm radius
     s.normalConf = vec4(estimatedNormal, localP.w);
     s.color = vec4(1.0, 1.0, 1.0, 1.0);
     s.id = generateSurfelId(worldP.xyz);

@@ -4,6 +4,8 @@ import com.linetrace.app.core.Point
 import android.content.Context
 import android.opengl.GLES31
 import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -59,6 +61,61 @@ class GpuPoseSolver(private val context: Context) {
     private val poseBuffer = ByteBuffer.allocateDirect(MAX_NODES * 64).order(ByteOrder.nativeOrder())
     private val extractCounterBuffer = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
     private val deltaDownloadBuffer = ByteBuffer.allocateDirect(2000 * 64).order(ByteOrder.nativeOrder())
+
+    fun applyCorrections(corrections: JSONArray) {
+        // Apply remote corrections to the pose SSBO
+        // Correction format: [{"id": 0, "pose": [16 floats]}, ...]
+        poseBuffer.clear()
+        for (i in 0 until corrections.length()) {
+            val corr = corrections.getJSONObject(i)
+            // val id = corr.getInt("id") // In a more complex solver we'd use this to index
+            val poseArr = corr.getJSONArray("pose")
+            
+            // Assume the server returns nodes in the same order as they were sent, 
+            // or that we are updating a contiguous block starting from 0.
+            if (i < MAX_NODES) {
+                for (j in 0 until 16) {
+                    poseBuffer.putFloat(poseArr.getDouble(j).toFloat())
+                }
+            }
+        }
+        poseBuffer.flip()
+        
+        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, poseSSBO[0])
+        GLES31.glBufferSubData(GLES31.GL_SHADER_STORAGE_BUFFER, 0, poseBuffer.limit(), poseBuffer)
+        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+    }
+
+    fun serializeFactors(edges: List<PoseEdge>): JSONObject {
+        val json = JSONObject()
+        val edgesArray = JSONArray()
+        for (edge in edges) {
+            val edgeObj = JSONObject()
+            edgeObj.put("from", edge.from)
+            edgeObj.put("to", edge.to)
+            val transformArray = JSONArray()
+            for (v in edge.transform) transformArray.put(v)
+            edgeObj.put("transform", transformArray)
+            edgesArray.put(edgeObj)
+        }
+        json.put("edges", edgesArray)
+        return json
+    }
+
+    fun serializeNodes(nodes: List<PoseNode>): JSONObject {
+        val json = JSONObject()
+        val nodesArray = JSONArray()
+        for (node in nodes) {
+            val nodeObj = JSONObject()
+            nodeObj.put("id", node.id)
+            val poseArray = JSONArray()
+            for (v in node.pose) poseArray.put(v)
+            nodeObj.put("pose", poseArray)
+            nodesArray.put(nodeObj)
+        }
+        json.put("nodes", nodesArray)
+        return json
+    }
 
     private val warpSSBO = IntArray(1)
     private val MAX_WARP_POINTS = 128
@@ -308,13 +365,27 @@ class GpuPoseSolver(private val context: Context) {
         val tsHigh = (timestamp shr 32).toInt()
         GLES31.glUniform2ui(GLES31.glGetUniformLocation(programSurfelFusion, "uTimestamp"), tsLow, tsHigh)
 
+        // Reset counter to current surfel count for atomic append
+        extractCounterBuffer.clear()
+        extractCounterBuffer.order(ByteOrder.nativeOrder()).asIntBuffer().put(0, surfelCounts[activeBufferIndex])
+        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, counterSSBO[0])
+        GLES31.glBufferSubData(GLES31.GL_SHADER_STORAGE_BUFFER, 0, 4, extractCounterBuffer)
+
         GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, pcSSBO[0])
         GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 1, surfelSSBO[activeBufferIndex])
+        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 2, counterSSBO[0])
 
         GLES31.glDispatchCompute((pointCount + 127) / 128, 1, 1)
         GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
 
-        surfelCounts[activeBufferIndex] = (surfelCounts[activeBufferIndex] + pointCount).coerceAtMost(MAX_SURFELS)
+        // Read back updated count after Spatial Delta merging
+        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, counterSSBO[0])
+        val ptr = GLES31.glMapBufferRange(GLES31.GL_SHADER_STORAGE_BUFFER, 0, 4, GLES31.GL_MAP_READ_BIT)
+        ptr?.let {
+            val updatedCount = (it as ByteBuffer).order(ByteOrder.nativeOrder()).asIntBuffer().get(0)
+            surfelCounts[activeBufferIndex] = updatedCount.coerceAtMost(MAX_SURFELS)
+            GLES31.glUnmapBuffer(GLES31.GL_SHADER_STORAGE_BUFFER)
+        }
     }
 
     private var pcTextureId = -1

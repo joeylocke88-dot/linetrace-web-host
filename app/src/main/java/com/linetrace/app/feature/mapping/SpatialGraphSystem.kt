@@ -1,6 +1,8 @@
 package com.linetrace.app.feature.mapping
 
 import android.opengl.Matrix
+import com.linetrace.app.feature.sync.ImuNetworkBridge
+import org.json.JSONObject
 import kotlin.collections.ArrayDeque
 import kotlin.math.sqrt
 
@@ -120,11 +122,28 @@ class LoopClosureDetector {
     }
 }
 
-class PoseGraphOptimizer(private val gpuSolver: GpuPoseSolver? = null) {
+class PoseGraphOptimizer(
+    private val gpuSolver: GpuPoseSolver? = null,
+    private val imuBridge: ImuNetworkBridge? = null,
+    private val isHypervisor: Boolean = false
+) {
     fun optimize(graph: PoseGraph, iterations: Int = 5) {
         val nodes = graph.nodes
         val edges = graph.edges
         if (edges.isEmpty()) return
+
+        if (isHypervisor && imuBridge != null && gpuSolver != null) {
+            // GPU Boost: Offload Pose Graph Optimization to PC
+            val nodesJson = gpuSolver.serializeNodes(nodes)
+            val factorsJson = gpuSolver.serializeFactors(edges)
+            val taskData = JSONObject().apply {
+                put("nodes", nodesJson)
+                put("factors", factorsJson)
+                put("iterations", iterations)
+            }
+            imuBridge.sendComputeTask("pose_graph_solve", taskData)
+            return
+        }
 
         if (gpuSolver != null) {
             // FLOWSTATE GPU PATH
@@ -138,7 +157,7 @@ class PoseGraphOptimizer(private val gpuSolver: GpuPoseSolver? = null) {
             return
         }
 
-        // CPU FALLBACK PATH
+        // CPU FALLBACK PATH: Robust SE(3) Pose Averaging
         val nodeMap = nodes.associateBy { it.id }
 
         repeat(iterations) {
@@ -146,16 +165,43 @@ class PoseGraphOptimizer(private val gpuSolver: GpuPoseSolver? = null) {
                 val nodeA = nodeMap[edge.from] ?: continue
                 val nodeB = nodeMap[edge.to] ?: continue
 
-                // Ideal pose for B based on A and edge transform
-                val idealB = FloatArray(16)
-                Matrix.multiplyMM(idealB, 0, nodeA.pose, 0, edge.transform, 0)
+                // Compute the expected pose of B relative to A
+                val expectedB = FloatArray(16)
+                Matrix.multiplyMM(expectedB, 0, nodeA.pose, 0, edge.transform, 0)
 
-                // Simple linear interpolation
-                val alpha = 0.1f * edge.confidence
+                // Final SGS Architecture: Smoothly converge node B toward its spatial constraints
+                val alpha = 0.25f * edge.confidence
                 for (i in 0 until 16) {
-                    nodeB.pose[i] = nodeB.pose[i] * (1f - alpha) + idealB[i] * alpha
+                    nodeB.pose[i] = (nodeB.pose[i] * (1f - alpha)) + (expectedB[i] * alpha)
                 }
+                
+                // Ensure the rotation remains normalized (re-orthonormalize)
+                // This prevents the matrix from decomposing over multiple iterations
+                orthonormalize(nodeB.pose)
             }
         }
+    }
+
+    private fun orthonormalize(m: FloatArray) {
+        // Simple Gram-Schmidt for the rotation part of the 4x4 matrix
+        val x = floatArrayOf(m[0], m[1], m[2])
+        val y = floatArrayOf(m[4], m[5], m[6])
+        
+        // Normalize X
+        val invX = 1.0f / Math.sqrt((x[0]*x[0] + x[1]*x[1] + x[2]*x[2]).toDouble()).toFloat()
+        m[0] *= invX; m[1] *= invX; m[2] *= invX
+        
+        // Project Y onto X and subtract to get orthogonal Y
+        val dot = m[0]*y[0] + m[1]*y[1] + m[2]*y[2]
+        m[4] -= dot * m[0]; m[5] -= dot * m[1]; m[6] -= dot * m[2]
+        
+        // Normalize Y
+        val invY = 1.0f / Math.sqrt((m[4]*m[4] + m[5]*m[5] + m[6]*m[6]).toDouble()).toFloat()
+        m[4] *= invY; m[5] *= invY; m[6] *= invY
+        
+        // Z is X cross Y
+        m[8] = m[1]*m[6] - m[2]*m[5]
+        m[9] = m[2]*m[4] - m[0]*m[6]
+        m[10] = m[0]*m[5] - m[1]*m[4]
     }
 }
