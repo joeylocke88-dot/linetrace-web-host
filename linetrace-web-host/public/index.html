@@ -298,6 +298,19 @@
     };
   }
 
+  // =========================
+  // ACTIONS
+  // =========================
+
+  function sendReset() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "reset_world" }));
+      log("📡 Reset command sent to server");
+    } else {
+      log("❌ Not connected");
+    }
+  }
+
   function handleBinaryMessage(buffer) {
       const dataView = new DataView(buffer);
       const type = dataView.getInt8(0);
