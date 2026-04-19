@@ -111,6 +111,34 @@ class Rectifier(
             posZ = pos[2]
         )
     }
+
+    /**
+     * Flash Scan: Aggressive "Seek and Destroy" for system inconsistencies.
+     * Purges corrupted state and forces a hard-reset of the sensor and render pipelines.
+     */
+    fun flashScan() {
+        Log.w("Rectifier", "FLASH SCAN INITIATED. Purging system malware/inconsistencies...")
+        
+        // 1. Purge Telemetry Buffers (In case of noise overflow)
+        if (infrastructure.getSurfelCount() > 1000000) {
+            Log.e("Rectifier", "Critical Density detected. Purging Surfel Cloud...")
+            renderer.resetTracing()
+        }
+
+        // 2. Network Bridge Resurrection
+        if (!connectivity.isConnected()) {
+            Log.e("Rectifier", "Network Bridge Failure. Executing hard reconnect...")
+            network.connect()
+        }
+
+        // 3. Fusion Hard Reset if stability is zero
+        if (perception.getStability() < 0.05f) {
+            Log.e("Rectifier", "Total Perception Collapse. Forcing Fusion Reset...")
+            fusion.reset()
+        }
+
+        Log.i("Rectifier", "Flash Scan Complete. System Integrity Restored.")
+    }
 }
 
 /**
