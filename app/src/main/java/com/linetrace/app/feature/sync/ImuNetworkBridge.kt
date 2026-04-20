@@ -79,7 +79,7 @@ class ImuNetworkBridge(
     private var lastPathPos: FloatArray? = null
     
     // Pre-allocated buffers for zero-allocation streaming
-    private val surfelTransferArray = ByteArray(2000 * 64 + 9)
+    private val surfelTransferArray = ByteArray(2000 * 64 + 25) // [Type:1][TS:8][UUID:16][Data:N]
     private val surfelTransferBuffer = ByteBuffer.wrap(surfelTransferArray).order(ByteOrder.LITTLE_ENDIAN)
     
     private val lz4Compressor = LZ4Factory.fastestInstance().fastCompressor()
@@ -397,12 +397,16 @@ class ImuNetworkBridge(
         surfelTransferBuffer.put(TYPE_WORLD_DELTA)
         surfelTransferBuffer.putLong(delta.timestamp)
         
+        // Add Sender ID (MSB then LSB) to match server side [Type:1][Timestamp:8][SenderMSB:8][SenderLSB:8][Data:N]
+        surfelTransferBuffer.putLong(delta.senderId.mostSignificantBits)
+        surfelTransferBuffer.putLong(delta.senderId.leastSignificantBits)
+        
         val dup = delta.surfelData.duplicate()
         surfelTransferBuffer.put(dup)
         
         try {
             surfelTransferBuffer.position(0)
-            surfelTransferBuffer.limit(1 + 8 + remaining)
+            surfelTransferBuffer.limit(1 + 8 + 16 + remaining)
             currentClient.send(surfelTransferBuffer)
         } catch (e: Exception) {
             Log.e("ImuNetworkBridge", "Failed to send binary world_delta", e)
