@@ -59,7 +59,7 @@
             android:id="@+id/editServerIp"
             android:layout_width="200dp"
             android:layout_height="wrap_content"
-            android:layout_topMargin="48dp"
+            android:layout_marginTop="48dp"
             android:background="@android:color/transparent"
             style="@style/TacticalLabel"
             android:gravity="center"

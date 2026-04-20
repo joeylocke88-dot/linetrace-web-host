@@ -296,22 +296,32 @@ wss.on("connection", (ws, req) => {
             }
         } else if (type === 0x04) { // TYPE_COMPRESSED_PC
             const timestamp = raw.readBigInt64LE(1);
-            const originalSize = raw.readInt32LE(9);
-            const compressed = raw.subarray(13);
+            // New Format: [Type:1][TS:8][UUID:16][OrigSize:4][Data:N]
+            const senderIdMSB = raw.readBigInt64LE(9);
+            const senderIdLSB = raw.readBigInt64LE(17);
+            const originalSize = raw.readInt32LE(25);
+            const compressed = raw.subarray(29);
             try {
+                // lz4js handles standard LZ4 frames (including magic numbers)
                 const decompressed = lz4.decompress(compressed);
+
                 if (Math.random() < 0.05) {
                     console.log(`[${room}] Decompressed PC from ${user}: ${compressed.length} -> ${decompressed.length} bytes`);
                 }
-                // Forward as raw TYPE_POINT_CLOUD (0x01) to web clients for simplicity
-                const out = Buffer.alloc(1 + 8 + decompressed.length);
+
+                // Forward as raw TYPE_POINT_CLOUD (0x01) to web clients
+                // Packet: [Type:1][TS:8][UUID:16][Data:N]
+                const out = Buffer.alloc(1 + 8 + 16 + decompressed.length);
                 out.writeInt8(0x01, 0);
                 out.writeBigInt64LE(timestamp, 1);
-                Buffer.from(decompressed).copy(out, 9);
+                out.writeBigInt64LE(senderIdMSB, 9);
+                out.writeBigInt64LE(senderIdLSB, 17);
+                Buffer.from(decompressed).copy(out, 25);
+
                 broadcast(room, out, ws);
                 return;
             } catch (e) {
-                console.error("LZ4 Decompression failed:", e.message);
+                console.error("LZ4 Decompression failed (likely magic number mismatch):", e.message);
             }
         } else if (type === 0x01 || type === 0x03) {
             // Forward PC and Camera Pose directly (Optimization path)

@@ -13,6 +13,8 @@ import org.java_websocket.handshake.ServerHandshake
 import org.json.JSONArray
 import org.json.JSONObject
 import net.jpountz.lz4.LZ4Factory
+import net.jpountz.lz4.LZ4FrameOutputStream
+import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -77,6 +79,12 @@ class ImuNetworkBridge(
     // Cayley State Tracking
     private var lastImuPos: FloatArray? = null
     private var lastPathPos: FloatArray? = null
+
+    private val userUuid: java.util.UUID = try {
+        java.util.UUID.fromString(user.removePrefix("android_"))
+    } catch (e: Exception) {
+        java.util.UUID.nameUUIDFromBytes(user.toByteArray())
+    }
     
     // Pre-allocated buffers for zero-allocation streaming
     private val surfelTransferArray = ByteArray(2000 * 64 + 25) // [Type:1][TS:8][UUID:16][Data:N]
@@ -84,7 +92,7 @@ class ImuNetworkBridge(
     
     private val lz4Compressor = LZ4Factory.fastestInstance().fastCompressor()
 
-    private val poseTransferArray = ByteArray(1 + 8 + 64) 
+    private val poseTransferArray = ByteArray(1 + 8 + 16 + 64) 
     private val poseTransferBuffer = ByteBuffer.wrap(poseTransferArray).order(ByteOrder.LITTLE_ENDIAN)
 
     companion object {
@@ -102,21 +110,29 @@ class ImuNetworkBridge(
 
         val byteSize = remaining * 4
         
-        // Use Compressed Path (LZ4)
+        // Use Compressed Path (LZ4 Frame for JS Compatibility)
         try {
             val sourceBuffer = ByteBuffer.allocate(byteSize).order(ByteOrder.LITTLE_ENDIAN)
             sourceBuffer.asFloatBuffer().put(pcData.duplicate())
             val sourceArray = sourceBuffer.array()
             
-            val maxCompressedLength = lz4Compressor.maxCompressedLength(byteSize)
-            val compressed = ByteArray(maxCompressedLength)
-            val compressedLength = lz4Compressor.compress(sourceArray, 0, byteSize, compressed, 0, maxCompressedLength)
+            // Produce a valid LZ4 Frame that lz4js can decompress
+            val bos = ByteArrayOutputStream()
+            val zos = LZ4FrameOutputStream(bos)
+            zos.write(sourceArray)
+            zos.close()
+            val compressed = bos.toByteArray()
             
-            val outBuffer = ByteBuffer.allocate(1 + 8 + 4 + compressedLength).order(ByteOrder.LITTLE_ENDIAN)
+            val outBuffer = ByteBuffer.allocate(1 + 8 + 16 + 4 + compressed.size).order(ByteOrder.LITTLE_ENDIAN)
             outBuffer.put(TYPE_COMPRESSED_PC)
             outBuffer.putLong(System.currentTimeMillis())
-            outBuffer.putInt(byteSize) // Original size for decompressor
-            outBuffer.put(compressed, 0, compressedLength)
+            
+            // Add UUID for attribution
+            outBuffer.putLong(userUuid.mostSignificantBits)
+            outBuffer.putLong(userUuid.leastSignificantBits)
+            
+            outBuffer.putInt(byteSize) // Original size
+            outBuffer.put(compressed)
             outBuffer.flip()
             
             currentClient.send(outBuffer)
@@ -132,6 +148,10 @@ class ImuNetworkBridge(
         poseTransferBuffer.clear()
         poseTransferBuffer.put(TYPE_CAMERA_POSE)
         poseTransferBuffer.putLong(timestamp)
+        
+        // Add UUID for attribution
+        poseTransferBuffer.putLong(userUuid.mostSignificantBits)
+        poseTransferBuffer.putLong(userUuid.leastSignificantBits)
         
         for (v in matrix) poseTransferBuffer.putFloat(v)
 

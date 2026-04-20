@@ -320,18 +320,26 @@
       const dataView = new DataView(buffer);
       const type = dataView.getInt8(0);
       
+      // Extraction of User ID from UUID bytes (offset 9 to 25)
+      let userLabel = 'remote';
+      if (buffer.byteLength >= 25) {
+          const id = dataView.getUint32(9).toString(16).padStart(8, '0');
+          userLabel = `android_${id}`;
+      }
+
       if (type === 0x02) { // TYPE_WORLD_DELTA
           // Format: [Type:1][Timestamp:8][SenderMSB:8][SenderLSB:8][SurfelData:N]
           const surfelData = buffer.slice(25);
           handleWorldDelta({ surfelData });
       } else if (type === 0x01) { // TYPE_POINT_CLOUD (Raw)
-          const points = new Float32Array(buffer, 9);
+          // Format: [Type:1][Timestamp:8][SenderUUID:16][Data:N]
+          const points = new Float32Array(buffer, 25);
           handleRawPointCloud(points);
       } else if (type === 0x03) { // TYPE_CAMERA_POSE
-          // Format: [Type:1][Timestamp:8][Matrix:64]
-          const matrix = new Float32Array(buffer, 9, 16);
+          // Format: [Type:1][Timestamp:8][SenderUUID:16][Matrix:64]
+          const matrix = new Float32Array(buffer, 25, 16);
           handlePose({
-              user: 'remote_gpu',
+              user: userLabel,
               state: {
                   pos: { x: matrix[12], y: matrix[13], z: matrix[14] },
                   rot: null 
