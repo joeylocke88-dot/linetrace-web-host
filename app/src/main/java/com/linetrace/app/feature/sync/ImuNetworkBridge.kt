@@ -377,7 +377,7 @@ class ImuNetworkBridge(
     private fun scheduleReconnect() {
         handler.removeCallbacks(reconnectRunnable)
         // Force immediate, silent retry loop (cont)
-        handler.postDelayed(reconnectRunnable, 500L) 
+        handler.postDelayed(reconnectRunnable, 500L)
     }
 
     override fun broadcastDelta(delta: WorldDelta) {
