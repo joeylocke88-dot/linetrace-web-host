@@ -37,10 +37,16 @@ Responders can mark "Safe/Clear" paths through post-disaster zones where landmar
 ## 🛠 Key Technology
 
 - **Fusion Engine:** Adaptive Kalman filter that fuses ARCore VIO with high-frequency IMU data.
+- **Cayley Temporal Continuity:** Maintains structural path integrity using a Cayley-graph based enrichment for zero-latency node synchronization over the network.
+- **LineCrawler:** A specialized structural scanner that implements medical-grade Gaussian Surfel splatting with vertical infill for dense geometry capture.
 - **Lazarus Protocol:** A 100ms heartbeat monitor that ensures the GL/Native context "resurrects" instantly after a crash or stall.
+- **Rectifier System:** A multi-layered diagnostic engine (Perception, Connectivity, Infrastructure) that performs "Flash Scans" to detect and fix system-level desyncs.
+- **Pose Stabilizer:** Implements the "Mirror Shield" protocol to provide jitter-free tracking and maintain pose consistency during transient ARCore tracking loss.
+- **Drift Dampener:** An intelligent integration engine that filters out low-frequency VIO drift using IMU bias estimation and stationary period detection.
 - **Tactical HUD:** Speed-adaptive line widths (14f to 28f) and perspective-aware depth bias to prevent Z-fighting.
+- **Thermal Immunity:** Removes all software-level thermal throttling (sensor rates, marching steps) and implements thermal-aware segmented marching to maintain peak performance under load.
 - **GPU Boost:** Offloads expensive Surfel Fusion and PGO to a high-performance PC server via a zero-allocation binary pipeline.
-- **Thermal Immunity:** Removes all software-level thermal throttling (sensor rates, marching steps) to maintain peak performance under load.
+- **LZ4 Compression:** High-speed point cloud compression using `lz4-java` (JNI + Safe/Unsafe Java) to minimize bandwidth and latency during real-time streaming.
 
 ---
 

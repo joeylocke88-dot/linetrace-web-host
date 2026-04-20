@@ -198,6 +198,32 @@ const wss = new WebSocket.Server({
 });
 const rooms = new Map(); // roomName → Map<user, ws>
 
+/**
+ * Professional Identity Resolution
+ * Extracts room/user from headers (OAuth style) or fallbacks to query params
+ */
+function extractIdentity(req) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  let room = url.searchParams.get("room");
+  let user = url.searchParams.get("user");
+
+  // Header-based override (X-Device-ID / Authorization)
+  const deviceId = req.headers['x-device-id'];
+  const auth = req.headers['authorization'];
+
+  if (deviceId) user = deviceId;
+  if (auth && auth.startsWith('Bearer ')) {
+    // In a real OAuth flow, we'd validate the JWT here
+    const token = auth.split(' ')[1];
+    if (token.includes('_')) room = token.split('_')[0]; // Convention: room_token
+  }
+
+  return {
+    room: room || "default",
+    user: user || `web_${Math.random().toString(36).slice(2, 10)}`
+  };
+}
+
 function heartbeat() { this.isAlive = true; }
 
 const interval = setInterval(() => {
@@ -212,9 +238,8 @@ wss.on("connection", (ws, req) => {
   ws.isAlive = true;
   ws.on("pong", heartbeat);
 
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const room = url.searchParams.get("room") || "default";
-  let user = url.searchParams.get("user") || `web_${Math.random().toString(36).slice(2, 10)}`;
+  const { room, user: resolvedUser } = extractIdentity(req);
+  let user = resolvedUser;
 
   if (!rooms.has(room)) rooms.set(room, new Map());
   const clients = rooms.get(room);
@@ -227,7 +252,7 @@ wss.on("connection", (ws, req) => {
   ws.room = room;
   clients.set(user, ws);
 
-  console.log(`✅ [${room}] ${user} connected (${clients.size} total)`);
+  console.log(`✅ [${room}] ${user} connected (Auth: ${req.headers['authorization'] ? 'YES' : 'NO'})`);
 
   // Initial Sync: Anchor & Version
   ws.send(JSON.stringify({

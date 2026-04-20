@@ -10,7 +10,7 @@ json = "20240303"
 play-services-nearby = "19.3.0"
 okhttp = "4.12.0"
 java-websocket = "1.5.3"
-lz4-java = "1.8.1"
+lz4-java = "1.7.1"
 androidx-xr-runtime = "1.0.0-alpha12"
 androidx-xr-scenecore = "1.0.0-alpha13"
 foundationLayout = "1.10.6"
@@ -31,5 +31,5 @@ json = { group = "org.json", name = "json", version.ref = "json" }
 play-services-nearby = { group = "com.google.android.gms", name = "play-services-nearby", version.ref = "play-services-nearby" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 java-websocket-client = { group = "org.java-websocket", name = "Java-WebSocket", version.ref = "java-websocket" }
-lz4-java = { group = "org.lz4", name = "lz4-java", version.ref = "lz4-java" }
+lz4java = { group = "org.lz4", name = "lz4-java", version.ref = "lz4-java" }
 androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }

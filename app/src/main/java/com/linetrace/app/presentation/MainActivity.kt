@@ -187,12 +187,14 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         // 1. Initialize bridge with Render Production URL or default ASAP to avoid race conditions
         val prefs = getSharedPreferences("LineTracePrefs", Context.MODE_PRIVATE)
         val savedIp = prefs.getString("server_ip", "linetrace-web-host.onrender.com") ?: "linetrace-web-host.onrender.com"
+        val savedToken = prefs.getString("auth_token", null)
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
         
         imuBridge = ImuNetworkBridge(
             serverUrl = savedIp,
             room = "default",
-            user = "android_$deviceId"
+            user = "android_$deviceId",
+            authToken = savedToken
         )
         
         imuBridge.onConnectionStatusChanged { isConnected, message ->
@@ -222,11 +224,16 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
     private fun showStartScreen() {
         setContentView(R.layout.activity_start)
         
-        // Load saved IP
+        // Load saved IP and Token
         val prefs = getSharedPreferences("LineTracePrefs", Context.MODE_PRIVATE)
         val savedIp = prefs.getString("server_ip", "192.168.42.237")
+        val savedToken = prefs.getString("auth_token", "")
+        
         val editIp = findViewById<EditText>(R.id.editServerIp)
+        val editToken = findViewById<EditText>(R.id.editAuthToken)
+        
         editIp.setText(savedIp)
+        editToken.setText(savedToken)
 
         // Start Auto-Discovery
         serviceDiscovery = ServiceDiscovery(this)
@@ -234,11 +241,17 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         
         findViewById<View>(R.id.tapToStart).setOnClickListener {
             val enteredIp = editIp.text.toString().trim()
+            val enteredToken = editToken.text.toString().trim()
+            
             if (enteredIp.isNotEmpty()) {
-                // Save IP for next time
-                prefs.edit().putString("server_ip", enteredIp).apply()
+                // Save IP and Token for next time
+                prefs.edit().apply {
+                    putString("server_ip", enteredIp)
+                    putString("auth_token", enteredToken)
+                }.apply()
+                
                 // Keep discovery running to handle future IP changes
-                initializeMainUi(enteredIp)
+                initializeMainUi(enteredIp, if (enteredToken.isEmpty()) null else enteredToken)
             } else {
                 Toast.makeText(this, "Please enter a Server IP", Toast.LENGTH_SHORT).show()
             }
@@ -257,7 +270,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         }
     }
 
-    private fun initializeMainUi(targetIp: String) {
+    private fun initializeMainUi(targetIp: String, token: String?) {
         setContentView(R.layout.activity_main)
 
         root = findViewById(R.id.rootContainer)
@@ -275,7 +288,7 @@ class MainActivity : AppCompatActivity(), LineRenderer.FrameCallback {
         recorder = SessionRecorder(getExternalFilesDir("sessions"))
         arController = ArCoreController(this)
 
-        imuBridge.updateServerUrl(targetIp)
+        imuBridge.updateServerUrl(targetIp, token)
         imuBridge.connect()
         
         imuBridge.messageListener = object : ImuNetworkBridge.MessageListener {

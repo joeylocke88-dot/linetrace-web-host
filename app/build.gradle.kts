@@ -78,9 +78,17 @@ dependencies {
     implementation(libs.play.services.nearby)
     implementation(libs.okhttp)
     implementation(libs.java.websocket.client)
-    implementation(libs.lz4.java)
+    implementation(libs.lz4java)
     testImplementation(libs.junit)
     testImplementation(libs.mockito.core)
     testImplementation(libs.mockito.kotlin)
     testImplementation(libs.json)
+}
+
+configurations.all {
+    resolutionStrategy {
+        capabilitiesResolution.withCapability("org.lz4:lz4-java") {
+            select("org.lz4:lz4-java:1.7.1")
+        }
+    }
 }

@@ -59,7 +59,7 @@
             android:id="@+id/editServerIp"
             android:layout_width="200dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="48dp"
+            android:layout_topMargin="48dp"
             android:background="@android:color/transparent"
             style="@style/TacticalLabel"
             android:gravity="center"
@@ -69,6 +69,26 @@
             android:textColor="@color/neon_cyan"
             android:textColorHint="#4400E5FF"
             android:textSize="14sp" />
+
+        <View
+            android:layout_width="120dp"
+            android:layout_height="1dp"
+            android:layout_marginTop="4dp"
+            android:background="@color/neon_cyan_glow" />
+
+        <EditText
+            android:id="@+id/editAuthToken"
+            android:layout_width="200dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@android:color/transparent"
+            style="@style/TacticalLabel"
+            android:gravity="center"
+            android:hint="OAUTH TOKEN (OPTIONAL)"
+            android:inputType="textPassword"
+            android:textColor="@color/neon_cyan"
+            android:textColorHint="#4400E5FF"
+            android:textSize="12sp" />
 
         <View
             android:layout_width="120dp"
