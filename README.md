@@ -99,3 +99,10 @@ The host (`linetrace-web-host`) acts as a transparent relay for:
 - Requires an ARCore-supported Android device.
 - Optimized for high-vibration and high-velocity mounting (e.g., vehicle dashboards).
 - CSV export hooks included for telemetry analysis.
+- The terms of service for your API Client (e.g., your app) will (1) notify end users that the API Client includes ARCore functionality provided by Google; and (2) state that use of ARCore functionality is subject to the then-current versions of the: (A) Google Terms of Service at policies.google.com/terms; and (B) Google Privacy Policy at google.com/policies/privacy.
+
+User Privacy Disclosures
+You must follow the user privacy requirements applicable to your API Client.
+
+Child-Directed Applications
+You may not use ARCore Cloud Anchors or ARCore Geospatial API in an API Client that would be deemed to be a “Web site or online service directed to children” under the Children’s Online Privacy Protection Act (COPPA).
